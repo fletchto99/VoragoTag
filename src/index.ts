@@ -88,9 +88,12 @@ if (window.alt1) {
 		}
 	}, DETECT_INTERVAL);
 } else {
+	// Not running inside Alt1: emulate the Alt1 overlay window in the browser.
+	document.body.classList.add("browser");
+
 	const addappurl = `alt1://addapp/${new URL("./appconfig.json", document.location.href).href}`;
 	const addAppBtn = document.getElementById("addAppBtn") as HTMLButtonElement;
-	addAppBtn.style.display = "inline-block";
+	addAppBtn.style.display = "block";
 	addAppBtn.addEventListener("click", function () {
 		window.location.href = addappurl;
 	});
@@ -98,6 +101,6 @@ if (window.alt1) {
 	// Outside Alt1 (e.g. browsing the hosted page) offer a button to preview the
 	// timer without the game running.
 	const demoBtn = document.getElementById("demoBtn") as HTMLButtonElement;
-	demoBtn.style.display = "inline-block";
+	demoBtn.style.display = "block";
 	demoBtn.addEventListener("click", startVoragoTimer);
 }
