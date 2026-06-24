@@ -90,6 +90,7 @@ body.browser #appPanel {
   width: 100%;
   display: flex;
   gap: 3px;
+  margin: 6px 0;
 }
 
 .barSection {
