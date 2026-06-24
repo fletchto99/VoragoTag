@@ -36,6 +36,9 @@ body {
 #appPanel {
   box-sizing: border-box;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   padding: 6px 8px;
   color: var(--gold-text);
   background:
