@@ -19,6 +19,16 @@ const barEls = SECTIONS.map((s) => document.getElementById(s.id)! as HTMLElement
 // Image-match interval (ms) while waiting for the beam to appear.
 const DETECT_INTERVAL = 50;
 
+// Calibration offset (ms) compensating for the latency between the beam
+// actually appearing in-game and find() detecting it. The detector polls every
+// DETECT_INTERVAL ms and the screen capture + image match add their own delay,
+// so detection always lands slightly late and the countdown would otherwise
+// start (and end) late. Subtracting it from endTime shifts the whole countdown
+// earlier to keep it aligned with the in-game tick. Default is roughly one poll
+// interval; tune it up or down against a recording if the timer reads
+// consistently a tick late or early.
+const DETECT_LATENCY_MS = 50;
+
 let running = false;
 let rafId: number | null = null;
 let endTime = 0;
@@ -27,7 +37,7 @@ let lastText = "";
 const lastWidths: number[] = [];
 
 function startVoragoTimer() {
-  endTime = performance.now() + TOTAL_TIME * 1000;
+  endTime = performance.now() + TOTAL_TIME * 1000 - DETECT_LATENCY_MS;
   // If a countdown is already animating, just extending endTime is enough;
   // otherwise kick off the render loop.
   if (rafId === null) {

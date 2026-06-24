@@ -42,10 +42,16 @@ export function activeSection(remaining: number): Section {
 }
 
 // Snap the raw remaining seconds to the step of whichever section is active.
+// We round to the nearest step rather than flooring: the countdown is anchored
+// to the wall-clock instant the beam is detected, which can sit anywhere inside
+// a game tick. Flooring turned any sub-tick-late start into a full tick lost on
+// the display; rounding caps that error at half a step instead. The companion
+// DETECT_LATENCY_MS offset in index.ts removes the systematic late-detection
+// bias so this rounding stays centred on the true tick.
 export function snapRemainingSeconds(rawSecs: number): number {
   const secs = Math.max(0, rawSecs);
   const step = secs <= 0 ? SECTIONS[0].step : activeSection(secs).step;
-  return Math.floor(secs / step + 1e-9) * step;
+  return Math.round(secs / step + 1e-9) * step;
 }
 
 // Given the snapped remaining seconds, return the fill percentage for each
