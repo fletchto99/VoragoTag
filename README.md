@@ -1,6 +1,6 @@
 # Vorago Tag
 
-A [Alt1 Toolkit](https://runeapps.org/alt1) overlay for RuneScape that helps you
+An [Alt1 Toolkit](https://runeapps.org/alt1) overlay for RuneScape that helps you
 time your **target cycle (TC)** ult during the Vorago **Grandmaster (GM)
 rotation**.
 
@@ -18,9 +18,9 @@ right:
 
 | Segment    | Meaning                                                           |
 | ---------- | ----------------------------------------------------------------- |
-| `pre-ult`  | Lead-in before the ult window (before dropwdonw prebuild).        |
+| `pre-ult`  | Lead-in before the ult window (before dropdown prebuild).         |
 | `ult`      | The precise tick window to use your Ultimate (counts in 0.1s).    |
-| `post-ult` | The time after ulting (post dropdown build)                       |
+| `post-ult` | The time after ulting (post dropdown build).                      |
 | `tc`       | The final target-cycle window (counts in 0.1s).                   |
 
 The longer phases tick down in RuneScape game ticks (0.6s); the `ult` and `tc`
@@ -37,9 +37,11 @@ windows tick in fine 0.1s steps so you can hit the exact moment.
 ## Usage
 
 - Inside Alt1 the overlay watches the screen and starts the countdown
-  automatically at the start of a phase.
+  automatically when Vorago hits 0 HP at the end of a phase.
 - On the hosted page (outside Alt1) you can click **Start demo timer** to preview
   the countdown.
+
+**Note:** The end of the scop phase is currently not supported. The overlay will only start the countdown when Vorago hits 0 HP at the end of a phase. We could in theory detect the end of the scop phase, but it would require you to deal the final blow to the scop.
 
 ## Development
 
