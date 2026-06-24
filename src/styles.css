@@ -9,9 +9,10 @@
   --gold-border: #5e4406;
   --btn-text: #2a1c00;
 
-  /* Dark panel surface. */
-  --panel-top: #2a241d;
-  --panel-bottom: #15110b;
+  /* Dark navy stone panel surface, matching the embedded panel-texture.png
+     (sampled mean ~#0a1821). The gradient is the fallback if the image fails. */
+  --panel-top: #16262f;
+  --panel-bottom: #0a1721;
 }
 
 html,
@@ -38,8 +39,10 @@ body {
   padding: 6px 8px;
   color: var(--gold-text);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 8px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 8px),
+    url("./panel-texture.png"),
     linear-gradient(180deg, var(--panel-top) 0%, var(--panel-bottom) 100%);
+  background-repeat: no-repeat, repeat, no-repeat;
   background-color: var(--panel-bottom);
   box-shadow:
     inset 0 0 0 1px rgba(0, 0, 0, 0.7),
