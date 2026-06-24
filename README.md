@@ -10,6 +10,9 @@ Vorago Tag is a TC timer. It lines up your **Ultimate** with the exact tick you
 need to ult so your rotation fits in before the target cycles back on to Vorago
 for **P3** and **P5**.
 
+It is designed to complement the
+[PVME Vorago combat achievements rotation](https://pvme.io/pvme-guides/combat-achievements/vorago-ca/).
+
 When a phase ends the overlay counts down through four segments, filling left to
 right:
 
