@@ -16,12 +16,12 @@ It is designed to complement the
 When a phase ends the overlay counts down through four segments, filling left to
 right:
 
-| Segment    | Meaning                                                           |
-| ---------- | ----------------------------------------------------------------- |
-| `pre-ult`  | Lead-in before the ult window (before dropdown prebuild).         |
-| `ult`      | The precise tick window to use your Ultimate (counts in 0.1s).    |
-| `post-ult` | The time after ulting (post dropdown build).                      |
-| `tc`       | The final target-cycle window (counts in 0.1s).                   |
+| Segment    | Meaning                                                        |
+| ---------- | -------------------------------------------------------------- |
+| `pre-ult`  | Lead-in before the ult window (before dropdown prebuild).      |
+| `ult`      | The precise tick window to use your Ultimate (counts in 0.1s). |
+| `post-ult` | The time after ulting (post dropdown build).                   |
+| `tc`       | The final target-cycle window (counts in 0.1s).                |
 
 The longer phases tick down in RuneScape game ticks (0.6s); the `ult` and `tc`
 windows tick in fine 0.1s steps so you can hit the exact moment.

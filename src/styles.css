@@ -1,0 +1,204 @@
+:root {
+  /* Shared RuneScape-gold palette used by the bars and buttons. */
+  --gold-hi: #f6cf63;
+  --gold: #d49a1a;
+  --gold-mid: #b8860b;
+  --gold-bar-lo: #8c6408;
+  --gold-btn-lo: #946a08;
+  --gold-text: #ffb83f;
+  --gold-border: #5e4406;
+  --btn-text: #2a1c00;
+
+  /* Dark panel surface. */
+  --panel-top: #2a241d;
+  --panel-bottom: #15110b;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background-color: var(--panel-bottom);
+}
+
+/* The app surface. Inside Alt1 it fills the overlay window; in a plain
+   browser it is sized like the Alt1 overlay (see body.browser below). */
+#appFrame {
+  box-sizing: border-box;
+  height: 100%;
+}
+
+#appPanel {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 6px 8px;
+  color: var(--gold-text);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 8px),
+    linear-gradient(180deg, var(--panel-top) 0%, var(--panel-bottom) 100%);
+  background-color: var(--panel-bottom);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.7),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.04),
+    inset 0 0 24px rgba(0, 0, 0, 0.6);
+}
+
+/* ===== Browser-only emulation of the Alt1 overlay window =====
+   index.ts adds `browser` to <body> when not running inside Alt1. The
+   backdrop stands in for the RuneScape game world behind the overlay;
+   Alt1 itself draws the real window frame. */
+body.browser {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #5b3c25;
+  background-image:
+    radial-gradient(rgba(0, 0, 0, 0.18) 1px, transparent 1px),
+    radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(180deg, #6a4a32, #3f2715);
+  background-size:
+    5px 5px,
+    5px 5px,
+    100% 100%;
+  background-position:
+    0 0,
+    2px 2px,
+    0 0;
+}
+
+body.browser #appFrame {
+  position: relative;
+  width: 300px;
+  height: auto;
+  border: 1px solid #05060a;
+  border-radius: 2px;
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(150, 150, 165, 0.25);
+}
+
+body.browser #appPanel {
+  height: auto;
+  border-radius: 1px;
+}
+
+.voragoTimer {
+  width: 100%;
+  display: flex;
+  gap: 3px;
+}
+
+.barSection {
+  position: relative;
+  height: 22px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #0d0a06 0%, #1c150e 100%);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.barLabel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow:
+    0 0 2px #000,
+    0 0 2px #000;
+  pointer-events: none;
+}
+
+#remaining_time {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding-left: 4px;
+  font-size: 11px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow:
+    0 0 2px #000,
+    0 0 2px #000;
+  pointer-events: none;
+}
+
+#preUlt {
+  flex: 15 0 0;
+  border-radius: 3px 0 0 3px;
+}
+
+#Ult {
+  flex: 0.6 0 0;
+  min-width: 40px;
+}
+
+#postUlt {
+  flex: 8.4 0 0;
+}
+
+#tc {
+  flex: 0.6 0 0;
+  min-width: 40px;
+  border-radius: 0 3px 3px 0;
+}
+
+.voragoTimerBar {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(
+    180deg,
+    var(--gold-hi) 0%,
+    var(--gold) 45%,
+    var(--gold-mid) 55%,
+    var(--gold-bar-lo) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.35);
+  transition: width 0.1s;
+}
+
+#demoBtn,
+#addAppBtn {
+  box-sizing: border-box;
+  display: none;
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--btn-text);
+  background: linear-gradient(
+    180deg,
+    var(--gold-hi) 0%,
+    var(--gold) 50%,
+    var(--gold-mid) 51%,
+    var(--gold-btn-lo) 100%
+  );
+  border: 1px solid var(--gold-border);
+  border-radius: 3px;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+}
+
+#demoBtn:hover,
+#addAppBtn:hover {
+  background: linear-gradient(180deg, #ffe089 0%, #e6a91d 50%, #cf9a0d 51%, #a8780a 100%);
+}

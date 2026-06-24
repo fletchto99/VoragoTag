@@ -1,9 +1,9 @@
 {
-	"compilerOptions": {
-		"resolvePackageJsonExports": true,
-		"moduleResolution": "bundler",
-		"module": "ESNext",
-		"strict": true
-	},
-	"include": ["src"]
+  "compilerOptions": {
+    "resolvePackageJsonExports": true,
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "strict": true
+  },
+  "include": ["src"]
 }
