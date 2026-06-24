@@ -45,14 +45,17 @@ windows tick in fine 0.1s steps so you can hit the exact moment.
 
 ## Development
 
-Requires Node.js **>= 20.9**.
+Requires Node.js **>= 22** (an `.nvmrc` is provided, so `nvm use` picks the
+right version).
 
 ```bash
 npm install
-npm run dev      # development build to dist/
-npm run build    # production build to dist/
+npm run dev      # development build to dist/ (unminified, with source maps)
+npm run build    # production build to dist/ (minified)
 npm run watch    # rebuild on change
 npm test         # run unit tests
+npm run lint     # eslint + stylelint + prettier --check
+npm run format   # auto-format with prettier
 ```
 
 The app is built with TypeScript + webpack and the [`alt1`](https://npmjs.com/package/alt1)
