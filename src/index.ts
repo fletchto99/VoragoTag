@@ -14,8 +14,7 @@ import "./icon.png";
 
 // Load detection images
 const imgs = a1lib.webpackImages({
-	zeroHp: require("./zero_hp.data.png"),
-	zeroScopHp: require("./zero_scop_hp.data.png")
+	zeroHp: require("./zero_hp.data.png")
 });
 
 const remainingTimeEl = document.getElementById("remaining_time")!;
@@ -79,8 +78,7 @@ function find(): boolean {
 	const img = a1lib.captureHoldFullRs();
 	if (!img) return false;
 
-	return img.findSubimage(imgs.zeroHp).length > 0
-		|| img.findSubimage(imgs.zeroScopHp).length > 0;
+	return img.findSubimage(imgs.zeroHp).length > 0;
 }
 
 // Check if running inside alt1
