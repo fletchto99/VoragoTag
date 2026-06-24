@@ -45,7 +45,11 @@
 		min-width: 30px;
 	}
 	#postUlt {
-		flex: 9 0 0;
+		flex: 8.4 0 0;
+	}
+	#tc {
+		flex: 0.6 0 0;
+		min-width: 30px;
 		border-radius: 0 3px 3px 0;
 	}
 	.voragoTimerBar {
@@ -54,7 +58,7 @@
 		background-color: #b8860b;
 		transition: width 0.1s;
 	}
-	#demoBtn {
+	#demoBtn, #addAppBtn {
 		display: none;
 		margin-top: 6px;
 		padding: 4px 10px;
@@ -66,7 +70,7 @@
 		border-radius: 3px;
 		cursor: pointer;
 	}
-	#demoBtn:hover {
+	#demoBtn:hover, #addAppBtn:hover {
 		background-color: #d4a017;
 	}
 	</style>
@@ -86,7 +90,12 @@
 			<div class="voragoTimerBar" id="postUltBar"></div>
 			<span class="barLabel">post-ult</span>
 		</div>
+		<div class="barSection" id="tc">
+			<div class="voragoTimerBar" id="tcBar"></div>
+			<span class="barLabel">tc</span>
+		</div>
 	</div>
+	<button id="addAppBtn" type="button">Add to Alt1</button>
 	<button id="demoBtn" type="button">Start demo timer</button>
 	<script src="./main.js"></script>
 </body>

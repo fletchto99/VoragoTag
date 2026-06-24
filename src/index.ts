@@ -1,5 +1,11 @@
 import * as a1lib from "alt1";
 
+import {
+	TOTAL_TIME,
+	snapRemainingSeconds,
+	sectionPercentages,
+} from "./timer";
+
 // Tell webpack to include these files in the output
 import "./index.html";
 import "./appconfig.json";
@@ -15,28 +21,14 @@ const remainingTimeEl = document.getElementById("remaining_time")!;
 const preUltBarEl = document.getElementById("preUltBar")! as HTMLElement;
 const UltBarEl = document.getElementById("UltBar")! as HTMLElement;
 const postUltBarEl = document.getElementById("postUltBar")! as HTMLElement;
+const tcBarEl = document.getElementById("tcBar")! as HTMLElement;
 
 // Image-match interval (ms) while waiting for the beam to appear.
 const DETECT_INTERVAL = 50;
 // On-screen bar refresh interval (ms).
 const UPDATE_INTERVAL = 10;
 
-// Timer sections in fill order (left to right), with durations in seconds:
-//   pre-ult 15.0s -> ult 0.6s -> post-ult 9.0s
-const PRE_ULT_TIME = 15.0;
-const ULT_TIME = 0.6;
-const POST_ULT_TIME = 9.0;
-const TOTAL_TIME = PRE_ULT_TIME + ULT_TIME + POST_ULT_TIME;
-
-const sections = [
-	{ el: preUltBarEl, duration: PRE_ULT_TIME },
-	{ el: UltBarEl, duration: ULT_TIME },
-	{ el: postUltBarEl, duration: POST_ULT_TIME },
-];
-
-function sanitisePercentage(i: number): number {
-	return Math.min(100, Math.max(0, i));
-}
+const sections = [preUltBarEl, UltBarEl, postUltBarEl, tcBarEl];
 
 let running = false;
 let tickId: ReturnType<typeof setInterval> | null = null;
@@ -62,22 +54,15 @@ function updateVoragoTimer() {
 	const remainingMs = endTime - Date.now();
 	const rawSecs = Math.max(0, remainingMs / 1000);
 
-	// The ult window counts down in fine 0.1s steps; everywhere else snaps to
-	// RuneScape game ticks (0.6s).
-	const inUltWindow = rawSecs > POST_ULT_TIME && rawSecs <= POST_ULT_TIME + ULT_TIME;
-	const step = inUltWindow ? 0.1 : 0.6;
-	const secsNum = Math.floor(rawSecs / step + 1e-9) * step;
+	const secsNum = snapRemainingSeconds(rawSecs);
 	remainingTimeEl.textContent = secsNum.toFixed(1) + "s";
 
 	// Fill each section left to right based on elapsed time. A section that
 	// hasn't started clamps to 0%, and a finished one clamps to 100%.
-	const elapsed = TOTAL_TIME - secsNum;
-	let sectionStart = 0;
-	for (const section of sections) {
-		const pct = sanitisePercentage(((elapsed - sectionStart) / section.duration) * 100);
-		section.el.style.width = pct + "%";
-		sectionStart += section.duration;
-	}
+	const percentages = sectionPercentages(secsNum);
+	sections.forEach((el, i) => {
+		el.style.width = percentages[i] + "%";
+	});
 
 	if (remainingMs <= 0) {
 		stopVoragoTimer();
@@ -104,7 +89,11 @@ if (window.alt1) {
 	}, DETECT_INTERVAL);
 } else {
 	const addappurl = `alt1://addapp/${new URL("./appconfig.json", document.location.href).href}`;
-	remainingTimeEl.innerHTML = `<a href='${addappurl}'>Click here to add this app to Alt1</a>`;
+	const addAppBtn = document.getElementById("addAppBtn") as HTMLButtonElement;
+	addAppBtn.style.display = "inline-block";
+	addAppBtn.addEventListener("click", function () {
+		window.location.href = addappurl;
+	});
 
 	// Outside Alt1 (e.g. browsing the hosted page) offer a button to preview the
 	// timer without the game running.
