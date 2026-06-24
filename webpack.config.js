@@ -1,4 +1,5 @@
 const path = require("path");
+const TerserPlugin = require("terser-webpack-plugin");
 
 /**
  * @type {import("webpack").Configuration}
@@ -14,6 +15,17 @@ module.exports = {
   },
   devtool: false,
   externals: ["sharp", "canvas", "electron/common"],
+  optimization: {
+    minimizer: [
+      // Keep the default Terser minifier, but strip the (noise) license-style
+      // banner comments instead of extracting them to a separate
+      // main.js.LICENSE.txt sidecar file.
+      new TerserPlugin({
+        extractComments: false,
+        terserOptions: { format: { comments: false } },
+      }),
+    ],
+  },
   resolve: {
     extensions: [".wasm", ".tsx", ".ts", ".mjs", ".jsx", ".js"],
   },
