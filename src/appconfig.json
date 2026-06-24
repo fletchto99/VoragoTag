@@ -5,7 +5,7 @@
   "configUrl": "./appconfig.json",
   "iconUrl": "./icon.png",
   "defaultWidth": 300,
-  "defaultHeight": 34,
+  "defaultHeight": 84,
   "minWidth": 300,
   "minHeight": 34,
   "maxWidth": 600,
