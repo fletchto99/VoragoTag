@@ -1,6 +1,7 @@
 import * as a1lib from "alt1";
 
 import {
+	SECTIONS,
 	TOTAL_TIME,
 	snapRemainingSeconds,
 	sectionPercentages,
@@ -18,53 +19,58 @@ const imgs = a1lib.webpackImages({
 });
 
 const remainingTimeEl = document.getElementById("remaining_time")!;
-const preUltBarEl = document.getElementById("preUltBar")! as HTMLElement;
-const UltBarEl = document.getElementById("UltBar")! as HTMLElement;
-const postUltBarEl = document.getElementById("postUltBar")! as HTMLElement;
-const tcBarEl = document.getElementById("tcBar")! as HTMLElement;
+const barEls = SECTIONS.map((s) => document.getElementById(s.id)! as HTMLElement);
 
 // Image-match interval (ms) while waiting for the beam to appear.
 const DETECT_INTERVAL = 50;
-// On-screen bar refresh interval (ms).
-const UPDATE_INTERVAL = 10;
-
-const sections = [preUltBarEl, UltBarEl, postUltBarEl, tcBarEl];
 
 let running = false;
-let tickId: ReturnType<typeof setInterval> | null = null;
+let rafId: number | null = null;
 let endTime = 0;
+// Cache the last rendered values so we only touch the DOM when they change.
+let lastText = "";
+const lastWidths: number[] = [];
 
 function startVoragoTimer() {
-	endTime = Date.now() + TOTAL_TIME * 1000;
-	if (tickId === null) {
-		tickId = setInterval(updateVoragoTimer, UPDATE_INTERVAL);
+	endTime = performance.now() + TOTAL_TIME * 1000;
+	// If a countdown is already animating, just extending endTime is enough;
+	// otherwise kick off the render loop.
+	if (rafId === null) {
+		updateVoragoTimer();
 	}
-	updateVoragoTimer();
 }
 
 function stopVoragoTimer() {
-	if (tickId !== null) {
-		clearInterval(tickId);
-		tickId = null;
+	if (rafId !== null) {
+		cancelAnimationFrame(rafId);
+		rafId = null;
 	}
 	running = false;
 }
 
 function updateVoragoTimer() {
-	const remainingMs = endTime - Date.now();
-	const rawSecs = Math.max(0, remainingMs / 1000);
+	const remainingMs = endTime - performance.now();
+	const secsNum = snapRemainingSeconds(Math.max(0, remainingMs / 1000));
 
-	const secsNum = snapRemainingSeconds(rawSecs);
-	remainingTimeEl.textContent = secsNum.toFixed(1) + "s";
+	const text = secsNum.toFixed(1) + "s";
+	if (text !== lastText) {
+		remainingTimeEl.textContent = text;
+		lastText = text;
+	}
 
 	// Fill each section left to right based on elapsed time. A section that
 	// hasn't started clamps to 0%, and a finished one clamps to 100%.
 	const percentages = sectionPercentages(secsNum);
-	sections.forEach((el, i) => {
-		el.style.width = percentages[i] + "%";
-	});
+	for (let i = 0; i < barEls.length; i++) {
+		if (percentages[i] !== lastWidths[i]) {
+			barEls[i].style.width = percentages[i] + "%";
+			lastWidths[i] = percentages[i];
+		}
+	}
 
-	if (remainingMs <= 0) {
+	if (remainingMs > 0) {
+		rafId = requestAnimationFrame(updateVoragoTimer);
+	} else {
 		stopVoragoTimer();
 	}
 }
