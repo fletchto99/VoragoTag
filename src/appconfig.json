@@ -1,0 +1,16 @@
+{
+    "appName": "Vorago Tag",
+    "description": "An updated version of the vorago tag plugin with an overlay on when to ult",
+    "appUrl": "./index.html",
+    "configUrl": "./appconfig.json",
+    "iconUrl": "./icon.png",
+    "defaultWidth": 100,
+    "defaultHeight": 50,
+    "minWidth": 50,
+    "minHeight": 20,
+    "maxWidth": 400,
+    "maxHeight": 500,
+    "requestHandlers": [],
+    "activators": [],
+    "permissions": "overlay,pixel,gamestate"
+}
