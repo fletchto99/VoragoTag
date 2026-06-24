@@ -105,4 +105,10 @@ if (window.alt1) {
 } else {
 	const addappurl = `alt1://addapp/${new URL("./appconfig.json", document.location.href).href}`;
 	remainingTimeEl.innerHTML = `<a href='${addappurl}'>Click here to add this app to Alt1</a>`;
+
+	// Outside Alt1 (e.g. browsing the hosted page) offer a button to preview the
+	// timer without the game running.
+	const demoBtn = document.getElementById("demoBtn") as HTMLButtonElement;
+	demoBtn.style.display = "inline-block";
+	demoBtn.addEventListener("click", startVoragoTimer);
 }
