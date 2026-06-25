@@ -13,7 +13,7 @@ import {
 test("TOTAL_TIME is the sum of all section durations", () => {
   const sum = SECTIONS.reduce((t, s) => t + s.duration, 0);
   assert.equal(TOTAL_TIME, sum);
-  assert.equal(TOTAL_TIME, 24.6);
+  assert.equal(TOTAL_TIME, 24.0);
 });
 
 test("SECTIONS are in the expected fill order", () => {
@@ -44,7 +44,7 @@ test("activeSection maps remaining time to the right section", () => {
   assert.equal(label(9.0), "post-ult");
   assert.equal(label(9.6), "ult");
   assert.equal(label(9.7), "pre-ult");
-  assert.equal(label(24.6), "pre-ult");
+  assert.equal(label(24.0), "pre-ult");
   // Out-of-range falls back to the first section.
   assert.equal(label(30), "pre-ult");
 });
@@ -88,7 +88,7 @@ test("sectionPercentages: fully elapsed -> all full", () => {
 });
 
 test("sectionPercentages: mid pre-ult only fills the first bar", () => {
-  // Half of pre-ult elapsed: remaining = TOTAL - 7.5
+  // Half of pre-ult elapsed: remaining = TOTAL - 7.2
   const pct = sectionPercentages(TOTAL_TIME - SECTIONS[0].duration / 2);
   assert.ok(Math.abs(pct[0] - 50) < 1e-9);
   assert.equal(pct[1], 0);

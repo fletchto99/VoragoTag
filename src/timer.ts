@@ -17,7 +17,7 @@ export interface Section {
 // (left to right). The ult and tc windows tick down in fine 0.1s steps; the
 // longer pre-ult / post-ult phases snap to RuneScape game ticks (0.6s).
 export const SECTIONS: Section[] = [
-  { id: "preUltBar", label: "pre-ult", duration: 15.0, step: 0.6 },
+  { id: "preUltBar", label: "pre-ult", duration: 14.4, step: 0.6 },
   { id: "UltBar", label: "ult", duration: 0.6, step: 0.1 },
   { id: "postUltBar", label: "post-ult", duration: 8.4, step: 0.6 },
   { id: "tcBar", label: "tc", duration: 0.6, step: 0.1 },
