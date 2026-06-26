@@ -40,8 +40,9 @@ windows tick in fine 0.1s steps so you can hit the exact moment.
   automatically when Vorago hits 0 HP at the end of a phase.
 - On the hosted page (outside Alt1) you can click **Start demo timer** to preview
   the countdown.
-- Tick **Play audio cue 0.1s into tc** to have the overlay beep 0.1s into the
-  final `tc` window. It is off by default; enabling it also primes audio playback.
+- Tick **Play audio cue on tc** to have the overlay beep when the final `tc`
+  window starts. It is off by default and your choice is remembered across app
+  restarts; enabling it also primes audio playback.
 
 **Note:** The end of the scop phase is currently not supported. The overlay will only start the countdown when Vorago hits 0 HP at the end of a phase. We could in theory detect the end of the scop phase, but it would require you to deal the final blow to the scop.
 

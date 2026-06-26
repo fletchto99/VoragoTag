@@ -64,15 +64,38 @@ function playAudioCue() {
   osc.type = "sine";
   osc.frequency.value = 880;
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.3, now + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+  gain.gain.exponentialRampToValueAtTime(0.6, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
   osc.connect(gain).connect(ctx.destination);
   osc.start(now);
-  osc.stop(now + 0.16);
+  osc.stop(now + 0.36);
 }
 
-// Initialise audio on the user gesture of enabling the cue.
+// Persist the audio-cue preference so it survives app restarts in Alt1.
+const AUDIO_CUE_STORAGE_KEY = "voragoTag.audioCueEnabled";
+
+function loadAudioCuePref(): boolean {
+  try {
+    return localStorage.getItem(AUDIO_CUE_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveAudioCuePref(enabled: boolean) {
+  try {
+    localStorage.setItem(AUDIO_CUE_STORAGE_KEY, String(enabled));
+  } catch {
+    // Storage unavailable (e.g. privacy mode); preference just won't persist.
+  }
+}
+
+// Restore the saved preference before wiring up the change handler.
+audioCueCheckbox.checked = loadAudioCuePref();
+
+// Persist the choice, and initialise audio on the user gesture of enabling it.
 audioCueCheckbox.addEventListener("change", () => {
+  saveAudioCuePref(audioCueCheckbox.checked);
   if (audioCueCheckbox.checked) ensureAudioContext();
 });
 
@@ -118,7 +141,7 @@ function updateVoragoTimer() {
   const remainingSecs = Math.max(0, remainingMs / 1000);
   const secsNum = snapRemainingSeconds(remainingSecs);
 
-  // Fire the optional audio cue once, when the countdown crosses 0.1s into tc.
+  // Fire the optional audio cue once, when the countdown crosses into tc.
   if (!cuePlayed && audioCueCheckbox.checked && remainingSecs <= TC_CUE_REMAINING) {
     cuePlayed = true;
     playAudioCue();

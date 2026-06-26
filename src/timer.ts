@@ -25,13 +25,10 @@ export const SECTIONS: Section[] = [
 
 export const TOTAL_TIME = SECTIONS.reduce((total, s) => total + s.duration, 0);
 
-// How far into the tc window the optional audio cue fires.
-export const TC_CUE_OFFSET = 0.1;
-
-// Remaining time (seconds) at which the optional audio cue should play: 0.1s
-// into the final tc window. tc owns the last SECTIONS entry, which starts at
-// `tc.duration` seconds remaining, so the cue point is that minus the offset.
-export const TC_CUE_REMAINING = SECTIONS[SECTIONS.length - 1].duration - TC_CUE_OFFSET;
+// Remaining time (seconds) at which the optional audio cue should play: the
+// start of the final tc window. tc owns the last SECTIONS entry, which begins
+// at `tc.duration` seconds remaining.
+export const TC_CUE_REMAINING = SECTIONS[SECTIONS.length - 1].duration;
 
 export function sanitisePercentage(i: number): number {
   return Math.min(100, Math.max(0, i));

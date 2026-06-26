@@ -24,10 +24,10 @@ test("SECTIONS are in the expected fill order", () => {
   );
 });
 
-test("TC_CUE_REMAINING is 0.1s into the tc window", () => {
-  // tc is the final section; the cue fires 0.1s after it starts.
-  assert.ok(Math.abs(TC_CUE_REMAINING - (SECTIONS[SECTIONS.length - 1].duration - 0.1)) < 1e-9);
-  assert.ok(Math.abs(TC_CUE_REMAINING - 0.5) < 1e-9);
+test("TC_CUE_REMAINING is the start of the tc window", () => {
+  // tc is the final section; the cue fires when it starts.
+  assert.ok(Math.abs(TC_CUE_REMAINING - SECTIONS[SECTIONS.length - 1].duration) < 1e-9);
+  assert.ok(Math.abs(TC_CUE_REMAINING - 0.6) < 1e-9);
 });
 
 test("sanitisePercentage clamps to the 0..100 range", () => {
