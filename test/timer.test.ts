@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   SECTIONS,
   TOTAL_TIME,
+  TC_CUE_REMAINING,
   activeSection,
   sanitisePercentage,
   snapRemainingSeconds,
@@ -21,6 +22,12 @@ test("SECTIONS are in the expected fill order", () => {
     SECTIONS.map((s) => s.label),
     ["pre-ult", "ult", "post-ult", "tc"],
   );
+});
+
+test("TC_CUE_REMAINING is 0.1s into the tc window", () => {
+  // tc is the final section; the cue fires 0.1s after it starts.
+  assert.ok(Math.abs(TC_CUE_REMAINING - (SECTIONS[SECTIONS.length - 1].duration - 0.1)) < 1e-9);
+  assert.ok(Math.abs(TC_CUE_REMAINING - 0.5) < 1e-9);
 });
 
 test("sanitisePercentage clamps to the 0..100 range", () => {

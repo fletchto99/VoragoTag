@@ -1,6 +1,6 @@
 import * as a1lib from "alt1";
 
-import { SECTIONS, TOTAL_TIME, snapRemainingSeconds, sectionPercentages } from "./timer";
+import { SECTIONS, TOTAL_TIME, TC_CUE_REMAINING, snapRemainingSeconds, sectionPercentages } from "./timer";
 
 // Tell webpack to include these files in the output
 import "./index.html";
@@ -15,6 +15,7 @@ const imgs = a1lib.webpackImages({
 
 const remainingTimeEl = document.getElementById("remaining_time")!;
 const barEls = SECTIONS.map((s) => document.getElementById(s.id)! as HTMLElement);
+const audioCueCheckbox = document.getElementById("audioCueCheckbox") as HTMLInputElement;
 
 // Image-match interval (ms) while waiting for the beam to appear.
 const DETECT_INTERVAL = 50;
@@ -31,10 +32,55 @@ let endTime = 0;
 let lastText = "";
 const lastWidths: number[] = [];
 
+// Optional audio cue, synthesised via the Web Audio API so no asset is needed.
+let audioCtx: AudioContext | null = null;
+// Guards the cue so it fires at most once per run.
+let cuePlayed = false;
+
+// Lazily create / resume the AudioContext. Browsers require a user gesture to
+// start audio, so we also call this when the checkbox is ticked.
+function ensureAudioContext(): AudioContext | null {
+  try {
+    if (audioCtx === null) {
+      const Ctor =
+        window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return null;
+      audioCtx = new Ctor();
+    }
+    if (audioCtx.state === "suspended") void audioCtx.resume();
+    return audioCtx;
+  } catch {
+    return null;
+  }
+}
+
+// Play a short beep to signal the tc cue point.
+function playAudioCue() {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = 880;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.3, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.16);
+}
+
+// Initialise audio on the user gesture of enabling the cue.
+audioCueCheckbox.addEventListener("change", () => {
+  if (audioCueCheckbox.checked) ensureAudioContext();
+});
+
 function startVoragoTimer() {
   // A new run cancels any pending post-fill reset so it can't wipe the bars
   // mid-countdown.
   clearPendingReset();
+  cuePlayed = false;
   endTime = performance.now() + TOTAL_TIME * 1000;
   // If a countdown is already animating, just extending endTime is enough;
   // otherwise kick off the render loop.
@@ -69,7 +115,14 @@ function resetBars() {
 
 function updateVoragoTimer() {
   const remainingMs = endTime - performance.now();
-  const secsNum = snapRemainingSeconds(Math.max(0, remainingMs / 1000));
+  const remainingSecs = Math.max(0, remainingMs / 1000);
+  const secsNum = snapRemainingSeconds(remainingSecs);
+
+  // Fire the optional audio cue once, when the countdown crosses 0.1s into tc.
+  if (!cuePlayed && audioCueCheckbox.checked && remainingSecs <= TC_CUE_REMAINING) {
+    cuePlayed = true;
+    playAudioCue();
+  }
 
   const text = secsNum.toFixed(1) + "s";
   if (text !== lastText) {
