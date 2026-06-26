@@ -25,6 +25,11 @@ export const SECTIONS: Section[] = [
 
 export const TOTAL_TIME = SECTIONS.reduce((total, s) => total + s.duration, 0);
 
+// Remaining time (seconds) at which the optional audio cue should play: the
+// start of the final tc window. tc owns the last SECTIONS entry, which begins
+// at `tc.duration` seconds remaining.
+export const TC_CUE_REMAINING = SECTIONS[SECTIONS.length - 1].duration;
+
 export function sanitisePercentage(i: number): number {
   return Math.min(100, Math.max(0, i));
 }

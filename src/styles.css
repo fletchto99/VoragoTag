@@ -181,6 +181,27 @@ body.browser #appPanel {
   transition: width 0.1s;
 }
 
+#audioCueToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--gold-text);
+  text-shadow:
+    0 0 2px #000,
+    0 0 2px #000;
+  cursor: pointer;
+  user-select: none;
+}
+
+#audioCueCheckbox {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--gold);
+}
+
 #demoBtn,
 #addAppBtn {
   box-sizing: border-box;
