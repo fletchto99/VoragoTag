@@ -1,6 +1,12 @@
 import * as a1lib from "alt1";
 
-import { SECTIONS, TOTAL_TIME, TC_CUE_REMAINING, snapRemainingSeconds, sectionPercentages } from "./timer";
+import {
+  SECTIONS,
+  TOTAL_TIME,
+  TC_CUE_REMAINING,
+  snapRemainingSeconds,
+  sectionPercentages,
+} from "./timer";
 
 // Tell webpack to include these files in the output
 import "./index.html";
@@ -43,7 +49,8 @@ function ensureAudioContext(): AudioContext | null {
   try {
     if (audioCtx === null) {
       const Ctor =
-        window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!Ctor) return null;
       audioCtx = new Ctor();
     }
