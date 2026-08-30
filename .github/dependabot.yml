@@ -6,11 +6,10 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      npm-minor-patch:
+      npm-all:
         applies-to: version-updates
-        update-types:
-          - minor
-          - patch
+        patterns:
+          - "*"
 
   - package-ecosystem: github-actions
     directory: /
