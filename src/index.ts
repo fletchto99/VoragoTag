@@ -1,13 +1,8 @@
 import * as a1lib from "alt1";
 
 import { EmptyHpDetector } from "./hp";
-import {
-  SECTIONS,
-  TOTAL_TIME,
-  TC_CUE_REMAINING,
-  snapRemainingSeconds,
-  sectionPercentages,
-} from "./timer";
+import { AudioCue } from "./audio";
+import { SECTIONS, TOTAL_TIME, snapRemainingSeconds, sectionPercentages } from "./timer";
 
 // Tell webpack to include these files in the output
 import "./index.html";
@@ -25,58 +20,26 @@ const imgs = a1lib.webpackImages({
 const remainingTimeEl = document.getElementById("remaining_time")!;
 const barEls = SECTIONS.map((s) => document.getElementById(s.id)! as HTMLElement);
 const audioCueCheckbox = document.getElementById("audioCueCheckbox") as HTMLInputElement;
+const captureStatusEl = document.getElementById("captureStatus")!;
+const audioStatusEl = document.getElementById("audioStatus")!;
+
+function setStatus(element: HTMLElement, message: string) {
+  if (element.textContent !== message) element.textContent = message;
+  if (element.hidden !== !message) element.hidden = !message;
+}
+
+const audioCue = new AudioCue((message) => setStatus(audioStatusEl, message));
 
 // How long the filled bar stays on screen after the countdown completes before
 // it clears back to empty.
 const RESET_DELAY = 1000;
 
-let running = false;
 let rafId: number | null = null;
 let resetTimeout: ReturnType<typeof setTimeout> | null = null;
 let endTime = 0;
 // Cache the last rendered values so we only touch the DOM when they change.
-let lastText = "";
-const lastWidths: number[] = [];
-
-// Optional audio cue, synthesised via the Web Audio API so no asset is needed.
-let audioCtx: AudioContext | null = null;
-// Guards the cue so it fires at most once per run.
-let cuePlayed = false;
-
-// Lazily create / resume the AudioContext. Browsers require a user gesture to
-// start audio, so we also call this when the checkbox is ticked.
-function ensureAudioContext(): AudioContext | null {
-  try {
-    if (audioCtx === null) {
-      const Ctor =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctor) return null;
-      audioCtx = new Ctor();
-    }
-    if (audioCtx.state === "suspended") void audioCtx.resume();
-    return audioCtx;
-  } catch {
-    return null;
-  }
-}
-
-// Play a short beep to signal the tc cue point.
-function playAudioCue() {
-  const ctx = ensureAudioContext();
-  if (!ctx) return;
-  const now = ctx.currentTime;
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = "sine";
-  osc.frequency.value = 880;
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.6, now + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
-  osc.connect(gain).connect(ctx.destination);
-  osc.start(now);
-  osc.stop(now + 0.36);
-}
+let lastSeconds: number | null = null;
+const lastPercentages: number[] = [];
 
 // Persist the audio-cue preference so it survives app restarts in Alt1.
 const AUDIO_CUE_STORAGE_KEY = "voragoTag.audioCueEnabled";
@@ -103,20 +66,17 @@ audioCueCheckbox.checked = loadAudioCuePref();
 // Persist the choice, and initialise audio on the user gesture of enabling it.
 audioCueCheckbox.addEventListener("change", () => {
   saveAudioCuePref(audioCueCheckbox.checked);
-  if (audioCueCheckbox.checked) ensureAudioContext();
+  audioCue.setEnabled(audioCueCheckbox.checked);
 });
 
 function startVoragoTimer() {
   // A new run cancels any pending post-fill reset so it can't wipe the bars
   // mid-countdown.
   clearPendingReset();
-  cuePlayed = false;
   endTime = performance.now() + TOTAL_TIME * 1000;
-  // If a countdown is already animating, just extending endTime is enough;
-  // otherwise kick off the render loop.
-  if (rafId === null) {
-    updateVoragoTimer();
-  }
+  audioCue.start(endTime, audioCueCheckbox.checked);
+  stopVoragoTimer();
+  updateVoragoTimer();
 }
 
 function stopVoragoTimer() {
@@ -124,7 +84,6 @@ function stopVoragoTimer() {
     cancelAnimationFrame(rafId);
     rafId = null;
   }
-  running = false;
 }
 
 function clearPendingReset() {
@@ -138,9 +97,10 @@ function clearPendingReset() {
 function resetBars() {
   resetTimeout = null;
   for (let i = 0; i < barEls.length; i++) {
-    barEls[i].style.width = "0%";
-    lastWidths[i] = 0;
+    barEls[i].style.transform = "scaleX(0)";
+    lastPercentages[i] = 0;
   }
+  lastSeconds = null;
 }
 
 function updateVoragoTimer() {
@@ -148,25 +108,15 @@ function updateVoragoTimer() {
   const remainingSecs = Math.max(0, remainingMs / 1000);
   const secsNum = snapRemainingSeconds(remainingSecs);
 
-  // Fire the optional audio cue once, when the countdown crosses into tc.
-  if (!cuePlayed && audioCueCheckbox.checked && remainingSecs <= TC_CUE_REMAINING) {
-    cuePlayed = true;
-    playAudioCue();
-  }
-
-  const text = secsNum.toFixed(1) + "s";
-  if (text !== lastText) {
-    remainingTimeEl.textContent = text;
-    lastText = text;
-  }
-
-  // Fill each section left to right based on elapsed time. A section that
-  // hasn't started clamps to 0%, and a finished one clamps to 100%.
-  const percentages = sectionPercentages(secsNum);
-  for (let i = 0; i < barEls.length; i++) {
-    if (percentages[i] !== lastWidths[i]) {
-      barEls[i].style.width = percentages[i] + "%";
-      lastWidths[i] = percentages[i];
+  if (secsNum !== lastSeconds) {
+    lastSeconds = secsNum;
+    remainingTimeEl.textContent = secsNum.toFixed(1) + "s";
+    const percentages = sectionPercentages(secsNum);
+    for (let i = 0; i < barEls.length; i++) {
+      if (percentages[i] !== lastPercentages[i]) {
+        barEls[i].style.transform = `scaleX(${percentages[i] / 100})`;
+        lastPercentages[i] = percentages[i];
+      }
     }
   }
 
@@ -180,18 +130,47 @@ function updateVoragoTimer() {
   }
 }
 
+function captureHp(area: a1lib.RectLike | null): a1lib.ImgRef | null {
+  if (!alt1.permissionPixel) {
+    setStatus(captureStatusEl, "Enable Alt1 pixel permission to detect HP.");
+    return null;
+  }
+  if (!alt1.rsLinked || alt1.rsWidth <= 0 || alt1.rsHeight <= 0) {
+    setStatus(captureStatusEl, "Waiting for Alt1 to find RuneScape.");
+    return null;
+  }
+
+  try {
+    const fits =
+      area &&
+      area.x >= 0 &&
+      area.y >= 0 &&
+      area.x + area.width <= alt1.rsWidth &&
+      area.y + area.height <= alt1.rsHeight;
+    const image = fits
+      ? a1lib.captureHold(area.x, area.y, area.width, area.height)
+      : a1lib.captureHoldFullRs();
+    setStatus(captureStatusEl, "");
+    return image;
+  } catch (error) {
+    setStatus(captureStatusEl, "RuneScape capture failed. Retrying.");
+    throw error;
+  }
+}
+
 // Check if running inside alt1
 if (window.alt1) {
   alt1.identifyAppUrl("./appconfig.json");
 
   void imgs.promise.then(() => {
     const detector = new EmptyHpDetector(imgs);
-    detector.startPolling(a1lib.captureHoldFullRs, () => {
-      if (!running) {
-        running = true;
-        startVoragoTimer();
-      }
-    });
+    detector.startPolling(
+      captureHp,
+      () => {
+        if (performance.now() >= endTime) startVoragoTimer();
+      },
+      () => alt1.captureInterval,
+    );
   });
 } else {
   // Not running inside Alt1: emulate the Alt1 overlay window in the browser.
