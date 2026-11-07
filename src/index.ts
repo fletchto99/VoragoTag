@@ -26,9 +26,6 @@ const remainingTimeEl = document.getElementById("remaining_time")!;
 const barEls = SECTIONS.map((s) => document.getElementById(s.id)! as HTMLElement);
 const audioCueCheckbox = document.getElementById("audioCueCheckbox") as HTMLInputElement;
 
-// Image-match interval (ms) for Vorago's empty HP bar.
-const DETECT_INTERVAL = 50;
-
 // How long the filled bar stays on screen after the countdown completes before
 // it clears back to empty.
 const RESET_DELAY = 1000;
@@ -189,13 +186,12 @@ if (window.alt1) {
 
   void imgs.promise.then(() => {
     const detector = new EmptyHpDetector(imgs);
-    setInterval(function () {
-      const img = a1lib.captureHoldFullRs();
-      if (img && detector.detect(img) && !running) {
+    detector.startPolling(a1lib.captureHoldFullRs, () => {
+      if (!running) {
         running = true;
         startVoragoTimer();
       }
-    }, DETECT_INTERVAL);
+    });
   });
 } else {
   // Not running inside Alt1: emulate the Alt1 overlay window in the browser.

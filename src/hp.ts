@@ -10,11 +10,33 @@ interface DetectionImages {
 const LEFT_EDGE_OFFSET = { x: -196, y: 20 };
 const HP_NUMBER_OFFSET = { x: 0, y: 22 };
 
+const TRACKED_INTERVAL = 25;
+const SEARCH_INTERVAL = 100;
+
 export class EmptyHpDetector {
   private position: PointLike | null = null;
   private wasEmpty = false;
 
   constructor(private readonly images: DetectionImages) {}
+
+  startPolling(capture: () => ImgRef | null, onEmpty: () => void): void {
+    const poll = () => {
+      let interval = SEARCH_INTERVAL;
+      try {
+        const image = capture();
+        if (image && this.detect(image)) {
+          onEmpty();
+        }
+        if (image && this.position) {
+          interval = TRACKED_INTERVAL;
+        }
+      } finally {
+        // Keep retrying after errors without swallowing them or queuing slow scans.
+        setTimeout(poll, interval);
+      }
+    };
+    poll();
+  }
 
   detect(image: ImgRef): boolean {
     if (

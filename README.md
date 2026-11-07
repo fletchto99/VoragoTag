@@ -77,6 +77,13 @@ Subsequent frames compare only the small name, left-edge
 ([`zero_hp.data.png`](src/zero_hp.data.png)), and blank-number
 ([`no_hp_number.data.png`](src/no_hp_number.data.png)) regions. A missing or
 moved name causes a new search; normal frames do not search the whole screen.
+Polling waits 25 ms between checks while the bar is located, or 100 ms while
+the name or capture is unavailable. A failed cached-name check immediately
+searches the same frame before falling back to the slower cadence. Each wait
+starts after the previous check finishes so slow scans cannot queue up.
+If the bar reappears already empty while searching, detection can incur up to
+100 ms of polling delay, plus capture and processing time. The countdown runs
+independently of polling.
 Transparent pixels in the left-edge template exclude the surrounding scenery.
 The image regression tests use these reference screenshots:
 
