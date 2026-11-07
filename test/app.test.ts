@@ -355,7 +355,7 @@ test("enabling during TC plays once immediately, but enabling after expiry does 
   assert.equal(app.oscillators.length, 1);
 });
 
-test("delayed audio resume uses the original countdown deadline", async () => {
+test("pending audio resume shows a warning and retains the countdown deadline", async () => {
   const app = await makeApp({ audioEnabled: true, suspended: true });
   let resume = () => {};
   app.state.resume = () =>
@@ -364,10 +364,19 @@ test("delayed audio resume uses the original countdown deadline", async () => {
     });
   app.state.onEmpty();
   assert.equal(app.oscillators.length, 0);
+  assert.match(app.get("audioStatus").textContent, /Audio paused/);
+  assert.equal(app.get("audioStatus").hidden, false);
+  await flushAudio();
+  assert.equal(app.audioContexts[0].state, "suspended");
+  assert.equal(app.oscillators.length, 0);
+  assert.match(app.get("audioStatus").textContent, /Audio paused/);
+  assert.equal(app.errors.length, 0);
   app.state.now = 1000;
   resume();
   await flushAudio();
   assert.deepEqual(app.oscillators[0].starts, [32.4]);
+  assert.equal(app.get("audioStatus").textContent, "");
+  assert.equal(app.get("audioStatus").hidden, true);
 });
 
 test("disabling a cue while resume is pending prevents stale audio scheduling", async () => {
@@ -379,9 +388,11 @@ test("disabling a cue while resume is pending prevents stale audio scheduling", 
     });
   app.state.onEmpty();
   app.toggle(false);
+  assert.equal(app.get("audioStatus").hidden, true);
   resume();
   await flushAudio();
   assert.equal(app.oscillators.length, 0);
+  assert.equal(app.get("audioStatus").hidden, true);
 });
 
 test("restarting while resume is pending schedules only the latest countdown", async () => {

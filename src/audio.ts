@@ -69,7 +69,10 @@ export class AudioCue {
         };
       }
       const context = this.context;
-      if (context.state === "suspended") await context.resume();
+      if (context.state === "suspended") {
+        this.setStatus("Audio paused. Waiting for playback to resume.");
+        await context.resume();
+      }
       // The state-change event can schedule the cue before resume() resolves.
       if (generation !== this.generation || this.scheduled) return;
       if (context.state !== "running") throw new Error("Audio playback is not available");
