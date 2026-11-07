@@ -53,6 +53,12 @@ body {
     inset 0 0 24px rgba(0, 0, 0, 0.6);
 }
 
+#appVersion {
+  font-size: 10px;
+  line-height: 12px;
+  opacity: 0.7;
+}
+
 /* ===== Browser-only emulation of the Alt1 overlay window =====
    index.ts adds `browser` to <body> when not running inside Alt1. The
    backdrop stands in for the RuneScape game world behind the overlay;
@@ -181,11 +187,18 @@ body.browser #appPanel {
   transition: width 0.1s;
 }
 
+#appOptions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 #audioCueToggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
   font-size: 12px;
   font-weight: bold;
   color: var(--gold-text);
