@@ -37,7 +37,12 @@ windows tick in fine 0.1s steps so you can hit the exact moment.
 ## Usage
 
 - Inside Alt1 the overlay watches the screen and starts the countdown
-  automatically when Vorago hits 0 HP at the end of a phase.
+  automatically when Vorago's new HP bar is completely empty at the end of a
+  phase. It locates the **VORAGO** name, then checks the empty left edge and the
+  absence of an HP number, not a literal `0`.
+- A continuously visible empty bar triggers only once. Detection rearms when
+  the bar is no longer empty or disappears. The bar can move around the screen,
+  but must use the same UI scale as the reference screenshots below.
 - On the hosted page (outside Alt1) you can click **Start demo timer** to preview
   the countdown.
 - Tick **Play audio cue on tc** to have the overlay beep when the final `tc`
@@ -65,6 +70,18 @@ The app is built with TypeScript + webpack and the [`alt1`](https://npmjs.com/pa
 library. The pure timer math lives in [`src/timer.ts`](src/timer.ts) and is
 covered by tests in [`test/`](test/). Pushes to `main` are deployed to GitHub
 Pages via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+
+HP detection lives in [`src/hp.ts`](src/hp.ts). It searches for
+[`vorago_name.data.png`](src/vorago_name.data.png) and caches its position.
+Subsequent frames compare only the small name, left-edge
+([`zero_hp.data.png`](src/zero_hp.data.png)), and blank-number
+([`no_hp_number.data.png`](src/no_hp_number.data.png)) regions. A missing or
+moved name causes a new search; normal frames do not search the whole screen.
+Transparent pixels in the left-edge template exclude the surrounding scenery.
+The image regression tests use these reference screenshots:
+
+- [Populated HP bar](https://cloud.fletchto99.com/s/ioACESzZnyFPFn4/preview)
+- [Empty HP bar](https://cloud.fletchto99.com/s/M4gBH5bmRcdLrRC/preview)
 
 ## Credits
 
