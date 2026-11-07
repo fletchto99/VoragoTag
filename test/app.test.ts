@@ -88,6 +88,7 @@ async function makeApp({ audioEnabled = false, suspended = false, browser = fals
     minimumInterval: () => 0,
     resume: (): Promise<void> => Promise.resolve(),
     captureError: null as Error | null,
+    captureUnavailable: false,
   };
   const oscillators: Oscillator[] = [];
   const gains: Gain[] = [];
@@ -102,14 +103,22 @@ async function makeApp({ audioEnabled = false, suspended = false, browser = fals
     return elements.get(id)!;
   };
   class FakeAudioContext {
-    state = suspended ? "suspended" : "running";
+    state: AudioContextState = suspended ? "suspended" : "running";
+    onstatechange: (() => void) | null = null;
     destination = {};
+    constructor() {
+      audioContexts.push(this);
+    }
     get currentTime() {
       return state.audioNow;
     }
     async resume() {
       await state.resume();
-      this.state = "running";
+      this.changeState("running");
+    }
+    changeState(value: AudioContextState) {
+      this.state = value;
+      this.onstatechange?.();
     }
     createOscillator() {
       const oscillator = new Oscillator();
@@ -122,6 +131,7 @@ async function makeApp({ audioEnabled = false, suspended = false, browser = fals
       return gain;
     }
   }
+  const audioContexts: FakeAudioContext[] = [];
   class Detector {
     startPolling(
       capture: typeof state.capture,
@@ -143,6 +153,7 @@ async function makeApp({ audioEnabled = false, suspended = false, browser = fals
   const capture = (area: RectLike | null) => {
     captures.push(area);
     if (state.captureError) throw state.captureError;
+    if (state.captureUnavailable) return null;
     return new ImgRefData(
       new ImageData(area?.width ?? alt1.rsWidth, area?.height ?? alt1.rsHeight),
       area?.x ?? 0,
@@ -206,6 +217,7 @@ async function makeApp({ audioEnabled = false, suspended = false, browser = fals
     gains,
     errors,
     captures,
+    audioContexts,
     raf,
     timeouts,
     render() {
@@ -382,7 +394,8 @@ test("restarting while resume is pending schedules only the latest countdown", a
   app.get("demoBtn").fire("click");
   resumes[0]();
   await flushAudio();
-  assert.equal(app.oscillators.length, 0);
+  assert.equal(app.oscillators.length, 1);
+  assert.deepEqual(app.oscillators[0].starts, [34.4]);
   resumes[1]();
   await flushAudio();
   assert.equal(app.oscillators.length, 1);
@@ -401,6 +414,78 @@ test("a resume that completes after countdown expiry does not play a late cue", 
   resume();
   await flushAudio();
   assert.equal(app.oscillators.length, 0);
+});
+
+test("suspension cancels a scheduled cue and resume rebases it against the countdown deadline", async () => {
+  const app = await makeApp({ audioEnabled: true });
+  app.state.onEmpty();
+  app.state.now = 10000;
+  app.state.audioNow = 20;
+  const context = app.audioContexts[0];
+  context.changeState("suspended");
+  assert.equal(app.oscillators[0].stops.at(-1), undefined);
+  assert.equal(app.oscillators[0].disconnected, true);
+  assert.equal(app.gains[0].disconnected, true);
+  assert.equal(app.get("audioStatus").hidden, false);
+
+  app.state.now = 15000;
+  context.changeState("running");
+  assert.equal(app.oscillators.length, 2);
+  assert.deepEqual(app.oscillators[1].starts, [28.4]);
+  assert.equal(app.get("audioStatus").hidden, true);
+  context.changeState("running");
+  assert.equal(app.oscillators.length, 2);
+});
+
+test("resuming a previously scheduled cue after countdown expiry leaves it cancelled", async () => {
+  const app = await makeApp({ audioEnabled: true });
+  app.state.onEmpty();
+  app.state.now = 10000;
+  app.state.audioNow = 20;
+  app.audioContexts[0].changeState("suspended");
+  app.state.now = 25000;
+  app.audioContexts[0].changeState("running");
+  assert.equal(app.oscillators[0].disconnected, true);
+  assert.equal(app.oscillators.length, 1);
+  assert.equal(app.get("audioStatus").hidden, true);
+});
+
+test("resuming inside the TC window schedules one immediate cue", async () => {
+  const app = await makeApp({ audioEnabled: true });
+  app.state.onEmpty();
+  app.state.now = 10000;
+  app.state.audioNow = 20;
+  app.audioContexts[0].changeState("suspended");
+  app.state.now = 23500;
+  app.audioContexts[0].changeState("running");
+  assert.equal(app.oscillators.length, 2);
+  assert.deepEqual(app.oscillators[1].starts, [20]);
+});
+
+test("audio disabled during suspension does not schedule another cue on resume", async () => {
+  const app = await makeApp({ audioEnabled: true });
+  app.state.onEmpty();
+  app.state.now = 10000;
+  app.state.audioNow = 20;
+  app.audioContexts[0].changeState("suspended");
+  assert.equal(app.oscillators[0].disconnected, true);
+  app.toggle(false);
+  app.state.now = 15000;
+  app.audioContexts[0].changeState("running");
+  assert.equal(app.oscillators.length, 1);
+  assert.equal(app.get("audioStatus").hidden, true);
+});
+
+test("suspending a cue that already started does not replay it on resume", async () => {
+  const app = await makeApp({ audioEnabled: true });
+  app.state.onEmpty();
+  app.state.now = 23500;
+  app.state.audioNow = 33.5;
+  app.audioContexts[0].changeState("suspended");
+  assert.equal(app.oscillators[0].disconnected, true);
+  app.state.now = 23600;
+  app.audioContexts[0].changeState("running");
+  assert.equal(app.oscillators.length, 1);
 });
 
 test("audio failures are visible and do not stop the countdown", async () => {
@@ -460,6 +545,21 @@ test("native capture errors remain visible until capture succeeds", async () => 
   assert.match(app.get("captureStatus").textContent, /capture failed/);
   assert.equal(app.get("captureStatus").hidden, false);
   app.state.captureError = null;
+  app.state.captureUnavailable = true;
+  assert.equal(app.state.capture(null), null);
+  assert.match(app.get("captureStatus").textContent, /capture failed/);
+  assert.equal(app.get("captureStatus").hidden, false);
+  app.state.captureUnavailable = false;
   app.state.capture(null);
   assert.equal(app.get("captureStatus").hidden, true);
+});
+
+test("null native captures show a failure for both full-window and regional requests", async () => {
+  const app = await makeApp();
+  app.state.captureUnavailable = true;
+  for (const area of [null, { x: 17, y: 20, width: 276, height: 44 }]) {
+    assert.equal(app.state.capture(area), null);
+    assert.match(app.get("captureStatus").textContent, /capture failed/);
+    assert.equal(app.get("captureStatus").hidden, false);
+  }
 });

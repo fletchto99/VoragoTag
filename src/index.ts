@@ -150,7 +150,7 @@ function captureHp(area: a1lib.RectLike | null): a1lib.ImgRef | null {
     const image = fits
       ? a1lib.captureHold(area.x, area.y, area.width, area.height)
       : a1lib.captureHoldFullRs();
-    setStatus(captureStatusEl, "");
+    setStatus(captureStatusEl, image ? "" : "RuneScape capture failed. Retrying.");
     return image;
   } catch (error) {
     setStatus(captureStatusEl, "RuneScape capture failed. Retrying.");

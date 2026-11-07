@@ -50,11 +50,28 @@ export class AudioCue {
           window.AudioContext ||
           (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!Ctor) throw new Error("Web Audio is not supported");
-        this.context = new Ctor();
+        const context = new Ctor();
+        this.context = context;
+        context.onstatechange = () => {
+          if (context !== this.context) return;
+          if (context.state === "running") {
+            void this.schedule();
+          } else {
+            this.cancel();
+            if (this.enabled && !this.played && performance.now() < this.endTime) {
+              this.setStatus(
+                context.state === "closed"
+                  ? "Audio unavailable. Toggle the cue to retry."
+                  : "Audio paused. Waiting for playback to resume.",
+              );
+            }
+          }
+        };
       }
       const context = this.context;
       if (context.state === "suspended") await context.resume();
-      if (generation !== this.generation) return;
+      // The state-change event can schedule the cue before resume() resolves.
+      if (generation !== this.generation || this.scheduled) return;
       if (context.state !== "running") throw new Error("Audio playback is not available");
       this.setStatus("");
 
