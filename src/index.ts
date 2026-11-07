@@ -1,5 +1,6 @@
 import * as a1lib from "alt1";
 
+import { EmptyHpDetector } from "./hp";
 import {
   SECTIONS,
   TOTAL_TIME,
@@ -16,14 +17,16 @@ import "./styles.css";
 
 // Load detection images
 const imgs = a1lib.webpackImages({
+  voragoName: require("./vorago_name.data.png"),
   zeroHp: require("./zero_hp.data.png"),
+  noHpNumber: require("./no_hp_number.data.png"),
 });
 
 const remainingTimeEl = document.getElementById("remaining_time")!;
 const barEls = SECTIONS.map((s) => document.getElementById(s.id)! as HTMLElement);
 const audioCueCheckbox = document.getElementById("audioCueCheckbox") as HTMLInputElement;
 
-// Image-match interval (ms) while waiting for the beam to appear.
+// Image-match interval (ms) for Vorago's empty HP bar.
 const DETECT_INTERVAL = 50;
 
 // How long the filled bar stays on screen after the countdown completes before
@@ -180,23 +183,20 @@ function updateVoragoTimer() {
   }
 }
 
-function find(): boolean {
-  const img = a1lib.captureHoldFullRs();
-  if (!img) return false;
-
-  return img.findSubimage(imgs.zeroHp).length > 0;
-}
-
 // Check if running inside alt1
 if (window.alt1) {
   alt1.identifyAppUrl("./appconfig.json");
 
-  setInterval(function () {
-    if (!running && find()) {
-      running = true;
-      startVoragoTimer();
-    }
-  }, DETECT_INTERVAL);
+  void imgs.promise.then(() => {
+    const detector = new EmptyHpDetector(imgs);
+    setInterval(function () {
+      const img = a1lib.captureHoldFullRs();
+      if (img && detector.detect(img) && !running) {
+        running = true;
+        startVoragoTimer();
+      }
+    }, DETECT_INTERVAL);
+  });
 } else {
   // Not running inside Alt1: emulate the Alt1 overlay window in the browser.
   document.body.classList.add("browser");
