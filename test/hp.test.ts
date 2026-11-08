@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { ImageData, ImgRefData } from "alt1";
+import { ImageData, ImgRefData, type RectLike } from "alt1";
 import sharp from "sharp";
 
 import { EmptyHpDetector } from "../src/hp";
@@ -248,4 +248,298 @@ test("shrinking the game window safely invalidates an out-of-bounds cached name"
   assert.equal(detector.detect(resized), false);
   assert.equal(resized.searches, 1);
   assert.equal(detector.detect(new ImgRefData(new ImageData(100, 50))), false);
+});
+
+test("polling checks a tracked bar every 25ms and keeps observing after a trigger", async (t) => {
+  const [templates, empty, populated] = await fixtures;
+  const active = new TrackedImage(place(populated, 100, 100));
+  const depleted = new TrackedImage(place(empty, 105, 101));
+  let frame = active;
+  const capture = t.mock.fn(() => frame);
+  const onEmpty = t.mock.fn();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  new EmptyHpDetector(templates).startPolling(capture, onEmpty);
+  assert.equal(capture.mock.callCount(), 1);
+  assert.equal(active.searches, 1);
+  assert.equal(onEmpty.mock.callCount(), 0);
+
+  t.mock.timers.tick(24);
+  assert.equal(capture.mock.callCount(), 1);
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 2);
+  assert.equal(active.searches, 1);
+
+  frame = depleted;
+  t.mock.timers.tick(25);
+  assert.equal(capture.mock.callCount(), 3);
+  assert.equal(onEmpty.mock.callCount(), 1);
+  assert.equal(depleted.searches, 0);
+  t.mock.timers.tick(25);
+  assert.equal(capture.mock.callCount(), 4);
+  assert.equal(onEmpty.mock.callCount(), 1);
+
+  frame = active;
+  t.mock.timers.tick(25);
+  frame = depleted;
+  t.mock.timers.tick(25);
+  assert.equal(onEmpty.mock.callCount(), 2);
+});
+
+test("polling captures and searches only every 100ms until the bar is located", async (t) => {
+  const [templates, empty] = await fixtures;
+  const missing = new TrackedImage(new ImageData(900, 300));
+  let frame = missing;
+  const capture = t.mock.fn(() => frame);
+  const onEmpty = t.mock.fn();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  new EmptyHpDetector(templates).startPolling(capture, onEmpty);
+  assert.equal(capture.mock.callCount(), 1);
+  assert.equal(missing.searches, 1);
+  t.mock.timers.tick(99);
+  assert.equal(capture.mock.callCount(), 1);
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 2);
+  assert.equal(missing.searches, 2);
+  assert.equal(onEmpty.mock.callCount(), 0);
+
+  frame = new TrackedImage(empty);
+  t.mock.timers.tick(99);
+  assert.equal(capture.mock.callCount(), 2);
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 3);
+  assert.equal(frame.searches, 1);
+  assert.equal(onEmpty.mock.callCount(), 1);
+  t.mock.timers.tick(24);
+  assert.equal(capture.mock.callCount(), 3);
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 4);
+  assert.equal(frame.searches, 1);
+  assert.equal(onEmpty.mock.callCount(), 1);
+});
+
+test("polling immediately searches a moved bar and slows down only when it is missing", async (t) => {
+  const [templates, empty] = await fixtures;
+  let frame = new TrackedImage(empty);
+  const capture = t.mock.fn(() => frame);
+  const onEmpty = t.mock.fn();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  new EmptyHpDetector(templates).startPolling(capture, onEmpty);
+  assert.equal(onEmpty.mock.callCount(), 1);
+
+  frame = new TrackedImage(place(empty, 270, 130));
+  t.mock.timers.tick(25);
+  assert.equal(capture.mock.callCount(), 2);
+  assert.equal(frame.searches, 1);
+  assert.equal(onEmpty.mock.callCount(), 1);
+  t.mock.timers.tick(25);
+  assert.equal(capture.mock.callCount(), 3);
+  assert.equal(frame.searches, 1);
+
+  frame = new TrackedImage(new ImageData(900, 300));
+  t.mock.timers.tick(25);
+  assert.equal(capture.mock.callCount(), 4);
+  assert.equal(frame.searches, 1);
+  t.mock.timers.tick(99);
+  assert.equal(capture.mock.callCount(), 4);
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 5);
+  assert.equal(frame.searches, 2);
+});
+
+test("unavailable captures back off without rearming a continuously empty bar", async (t) => {
+  const [templates, empty] = await fixtures;
+  const image = new TrackedImage(empty);
+  let frame: ImgRefData | null = image;
+  const capture = t.mock.fn(() => frame);
+  const onEmpty = t.mock.fn();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  new EmptyHpDetector(templates).startPolling(capture, onEmpty);
+  assert.equal(onEmpty.mock.callCount(), 1);
+
+  frame = null;
+  t.mock.timers.tick(25);
+  assert.equal(capture.mock.callCount(), 2);
+  t.mock.timers.tick(99);
+  assert.equal(capture.mock.callCount(), 2);
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 3);
+
+  frame = image;
+  t.mock.timers.tick(100);
+  assert.equal(capture.mock.callCount(), 4);
+  assert.equal(image.searches, 1);
+  assert.equal(onEmpty.mock.callCount(), 1);
+  t.mock.timers.tick(25);
+  assert.equal(capture.mock.callCount(), 5);
+  assert.equal(onEmpty.mock.callCount(), 1);
+});
+
+test("capture errors remain visible and polling retries after 100ms", async (t) => {
+  const [templates, empty] = await fixtures;
+  const image = new TrackedImage(empty);
+  const error = new Error("capturehold failed");
+  let unavailable = true;
+  const capture = t.mock.fn(() => {
+    if (unavailable) throw error;
+    return image;
+  });
+  const onEmpty = t.mock.fn();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  assert.throws(() => new EmptyHpDetector(templates).startPolling(capture, onEmpty), error);
+  assert.equal(capture.mock.callCount(), 1);
+  assert.equal(onEmpty.mock.callCount(), 0);
+
+  unavailable = false;
+  t.mock.timers.tick(99);
+  assert.equal(capture.mock.callCount(), 1);
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 2);
+  assert.equal(onEmpty.mock.callCount(), 1);
+  t.mock.timers.tick(25);
+  assert.equal(capture.mock.callCount(), 3);
+  assert.equal(image.searches, 1);
+  assert.equal(onEmpty.mock.callCount(), 1);
+});
+
+test("cached capture bounds enclose all templates and use local coordinates when cropped", async () => {
+  const [templates, empty] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  assert.equal(detector.captureArea, null);
+  assert.equal(detector.detect(new ImgRefData(empty)), true);
+  const area = detector.captureArea!;
+  assert.deepEqual(area, { x: 17, y: 20, width: 276, height: 44 });
+  const pixels = new ImgRefData(empty).read(area.x, area.y, area.width, area.height);
+  const cropped = new TrackedImage(pixels, area.x, area.y);
+  assert.equal(detector.detect(cropped), false);
+  assert.equal(cropped.searches, 0);
+  assert.deepEqual(cropped.reads, [
+    { x: 196, y: 0, width: 80, height: 15 },
+    { x: 0, y: 20, width: 36, height: 24 },
+    { x: 196, y: 22, width: 80, height: 20 },
+  ]);
+  assert.deepEqual(detector.captureArea, area);
+});
+
+test("locating a name in a nonzero-origin image stores game-window coordinates", async () => {
+  const [templates, empty] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  assert.equal(detector.detect(new ImgRefData(empty, 100, 50)), true);
+  assert.deepEqual(detector.captureArea, { x: 117, y: 70, width: 276, height: 44 });
+  assert.equal(detector.detect(new ImgRefData(empty, 100, 50)), false);
+});
+
+test("regional polling reacquires a moved empty bar without treating the crop miss as a reset", async (t) => {
+  const [templates, empty] = await fixtures;
+  let frame = new ImgRefData(place(empty, 0, 0));
+  const requests: (RectLike | null)[] = [];
+  const capture = (area: RectLike | null) => {
+    requests.push(area);
+    if (!area) return frame;
+    return new ImgRefData(frame.read(area.x, area.y, area.width, area.height), area.x, area.y);
+  };
+  const onEmpty = t.mock.fn();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  new EmptyHpDetector(templates).startPolling(capture, onEmpty);
+  assert.equal(onEmpty.mock.callCount(), 1);
+
+  t.mock.timers.tick(25);
+  assert.deepEqual(requests, [null, { x: 17, y: 20, width: 276, height: 44 }]);
+  frame = new ImgRefData(place(empty, 270, 130));
+  t.mock.timers.tick(25);
+  assert.deepEqual(requests.slice(-2), [{ x: 17, y: 20, width: 276, height: 44 }, null]);
+  assert.equal(onEmpty.mock.callCount(), 1);
+  t.mock.timers.tick(25);
+  assert.deepEqual(requests.at(-1), { x: 287, y: 150, width: 276, height: 44 });
+  assert.equal(onEmpty.mock.callCount(), 1);
+
+  frame = new ImgRefData(new ImageData(900, 300));
+  t.mock.timers.tick(25);
+  assert.equal(requests.at(-1), null);
+  const count = requests.length;
+  t.mock.timers.tick(99);
+  assert.equal(requests.length, count);
+  frame = new ImgRefData(place(empty, 270, 130));
+  t.mock.timers.tick(1);
+  assert.equal(requests.at(-1), null);
+  assert.equal(onEmpty.mock.callCount(), 2);
+});
+
+test("failed full-window fallback preserves the empty edge and uses the slower retry interval", async (t) => {
+  const [templates, empty] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  assert.equal(detector.detect(new ImgRefData(empty)), true);
+  const area = detector.captureArea!;
+  let failed = true;
+  const capture = t.mock.fn((requested: RectLike | null) => {
+    if (failed) {
+      return requested
+        ? new ImgRefData(new ImageData(area.width, area.height), area.x, area.y)
+        : null;
+    }
+    return new ImgRefData(empty);
+  });
+  const onEmpty = t.mock.fn();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  detector.startPolling(capture, onEmpty);
+  assert.equal(capture.mock.callCount(), 2);
+  assert.deepEqual(detector.captureArea, area);
+  t.mock.timers.tick(99);
+  assert.equal(capture.mock.callCount(), 2);
+  failed = false;
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 3);
+  assert.equal(onEmpty.mock.callCount(), 0);
+});
+
+test("polling respects a changing Alt1 minimum interval in tracking and search modes", async (t) => {
+  const [templates, empty] = await fixtures;
+  let frame = new ImgRefData(empty);
+  let minimum = 150;
+  const capture = t.mock.fn(() => frame);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  new EmptyHpDetector(templates).startPolling(
+    capture,
+    () => {},
+    () => minimum,
+  );
+  t.mock.timers.tick(149);
+  assert.equal(capture.mock.callCount(), 1);
+  minimum = 40;
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 2);
+  t.mock.timers.tick(39);
+  assert.equal(capture.mock.callCount(), 2);
+  frame = new ImgRefData(new ImageData(900, 300));
+  minimum = 200;
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 3);
+  t.mock.timers.tick(199);
+  assert.equal(capture.mock.callCount(), 3);
+  t.mock.timers.tick(1);
+  assert.equal(capture.mock.callCount(), 4);
+});
+
+test("invalid capture-rate hints retain the normal tracked cadence", async (t) => {
+  const [templates, empty] = await fixtures;
+  let hint = NaN;
+  const capture = t.mock.fn(() => new ImgRefData(empty));
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  new EmptyHpDetector(templates).startPolling(
+    capture,
+    () => {},
+    () => hint,
+  );
+  for (const invalid of [-1, 0, Infinity, 2147483648, NaN]) {
+    hint = invalid;
+    const count = capture.mock.callCount();
+    t.mock.timers.tick(24);
+    assert.equal(capture.mock.callCount(), count);
+    t.mock.timers.tick(1);
+    assert.equal(capture.mock.callCount(), count + 1);
+  }
 });
