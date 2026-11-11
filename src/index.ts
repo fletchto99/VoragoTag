@@ -112,7 +112,7 @@ function updateVoragoTimer() {
     lastSeconds = secsNum;
     remainingTimeEl.textContent = secsNum.toFixed(1) + "s";
   }
-  const percentages = sectionPercentages(remainingSecs);
+  const percentages = sectionPercentages(secsNum);
   for (let i = 0; i < barEls.length; i++) {
     if (percentages[i] !== lastPercentages[i]) {
       barEls[i].style.transform = `scaleX(${percentages[i] / 100})`;

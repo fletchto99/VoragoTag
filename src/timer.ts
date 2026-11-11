@@ -53,7 +53,7 @@ export function snapRemainingSeconds(rawSecs: number): number {
   return Math.max(0, Math.ceil(secs / step - 1e-9) * step);
 }
 
-// Given the actual remaining seconds, return the fill percentage for each
+// Given the snapped remaining seconds, return the fill percentage for each
 // section in left-to-right order.
 export function sectionPercentages(secsNum: number): number[] {
   const elapsed = TOTAL_TIME - secsNum;
