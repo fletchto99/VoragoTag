@@ -52,7 +52,8 @@ of the populated and empty HP bar, along with your Windows and RuneScape scaling
 
 When the bar is missing, full-window searches pause for up to four seconds between
 scans to reduce capture load. The last known position is still checked frequently;
-nearby movement is searched before scanning the whole window. Reacquiring a
+nearby movement is checked with an expanded regional capture before capturing
+and searching the whole window. Reacquiring a
 distant moved bar can take a few seconds. Normal fast tracking resumes once found.
 The timer and audio cue use the captured frame's timestamp, so processing that
 frame does not shift the action windows later.

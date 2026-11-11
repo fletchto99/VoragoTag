@@ -45,6 +45,15 @@ interface NameMatch {
   score: number;
 }
 
+function isExactCapture(image: ImgRef, area: RectLike): boolean {
+  return (
+    image.x === area.x &&
+    image.y === area.y &&
+    image.width === area.width &&
+    image.height === area.height
+  );
+}
+
 function nameSignature(image: ImageData) {
   const samples: PointLike[] = [];
   for (let row = 0; row < 4; row++) {
@@ -184,34 +193,37 @@ export class EmptyHpDetector {
     this.images = this.templates[0];
   }
 
-  private offset(point: PointLike): PointLike {
+  private offset(point: PointLike, scale = this.images.scale): PointLike {
     return {
-      x: Math.round(point.x * this.images.scale),
-      y: Math.round(point.y * this.images.scale),
+      x: Math.round(point.x * scale),
+      y: Math.round(point.y * scale),
     };
   }
 
   get captureArea(): RectLike | null {
-    if (!this.position) return null;
-    const left = this.offset(LEFT_EDGE_OFFSET);
-    const number = this.offset(HP_NUMBER_OFFSET);
-    const padding = this.images.scale === 1 ? 0 : 1;
+    return this.position ? this.captureAreaAt(this.position, this.images) : null;
+  }
+
+  private captureAreaAt(position: PointLike, images: ScaledImages): RectLike {
+    const left = this.offset(LEFT_EDGE_OFFSET, images.scale);
+    const number = this.offset(HP_NUMBER_OFFSET, images.scale);
+    const padding = images.scale === 1 ? 0 : 1;
     return {
-      x: this.position.x + left.x - padding,
-      y: this.position.y - padding,
+      x: position.x + left.x - padding,
+      y: position.y - padding,
       width:
         Math.max(
-          this.images.voragoName.width,
-          number.x + this.images.noHpNumber.width,
-          left.x + this.images.zeroHp.width,
+          images.voragoName.width,
+          number.x + images.noHpNumber.width,
+          left.x + images.zeroHp.width,
         ) -
         left.x +
         padding * 2,
       height:
         Math.max(
-          this.images.voragoName.height,
-          number.y + this.images.noHpNumber.height,
-          left.y + this.images.zeroHp.height,
+          images.voragoName.height,
+          number.y + images.noHpNumber.height,
+          left.y + images.zeroHp.height,
         ) +
         padding * 2,
     };
@@ -249,13 +261,8 @@ export class EmptyHpDetector {
           }
           const image = takeSnapshot(area);
           if (!image) return;
-          const cropped =
-            area &&
-            image.x === area.x &&
-            image.y === area.y &&
-            image.width === area.width &&
-            image.height === area.height;
-          scan = this.detectSteps(image, cropped ? () => takeSnapshot(null) : undefined, search);
+          const cropped = area && isExactCapture(image, area);
+          scan = this.detectSteps(image, cropped ? takeSnapshot : undefined, search);
         }
 
         const step = scan.next();
@@ -289,19 +296,44 @@ export class EmptyHpDetector {
 
   private *detectSteps(
     image: ImgRef,
-    captureFull?: () => ImgRef | null,
+    capture?: (area: RectLike | null) => ImgRef | null,
     search = true,
   ): Generator<void, boolean> {
     this.tracking = this.position !== null && this.matchesName(image, this.position);
     if (!this.tracking) {
       // Neither a crop miss nor a deferred search proves that the bar disappeared.
       if (!search) return false;
-      if (captureFull) {
-        const full = captureFull();
-        if (!full) return false;
-        image = full;
+      let match: NameMatch | null;
+      if (capture) {
+        const area = this.captureArea;
+        const x = area ? Math.max(0, area.x - NEARBY_SEARCH_RADIUS) : 0;
+        const y = area ? Math.max(0, area.y - NEARBY_SEARCH_RADIUS) : 0;
+        const nearbyArea = area
+          ? {
+              x,
+              y,
+              width: area.x + area.width + NEARBY_SEARCH_RADIUS - x,
+              height: area.y + area.height + NEARBY_SEARCH_RADIUS - y,
+            }
+          : null;
+        const nearby = capture(nearbyArea);
+        if (!nearby) return false;
+        image = nearby;
+        match = this.findNearbyName(image);
+        if (
+          nearbyArea &&
+          isExactCapture(image, nearbyArea) &&
+          (!match || !image.containsArea(this.captureAreaAt(match.position, match.images)))
+        ) {
+          // A local name match is not enough if a scale change clipped the HP regions.
+          const full = capture(null);
+          if (!full) return false;
+          image = full;
+          match = null;
+        }
+      } else {
+        match = this.findNearbyName(image);
       }
-      let match = this.findNearbyName(image);
       if (!match) {
         const found = image.findSubimage(this.templates[0].voragoName)[0];
         match = found
