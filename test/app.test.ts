@@ -79,11 +79,14 @@ class Oscillator {
 async function makeApp({ audioEnabled = false, suspended = false, browser = false } = {}) {
   const initialCapture: (area: RectLike | null) => ImgRef | null = () =>
     assert.fail("Detector not initialized");
+  const initialEmpty: (capturedAt?: number) => void = () => assert.fail("Detector not initialized");
+  const initialRead: (error: unknown | null) => void = () =>
+    assert.fail("Detector not initialized");
   const state = {
     now: 0,
     audioNow: 10,
-    percentageCalls: 0,
-    onEmpty: () => assert.fail("Detector not initialized"),
+    onEmpty: initialEmpty,
+    onRead: initialRead,
     capture: initialCapture,
     minimumInterval: () => 0,
     resume: (): Promise<void> => Promise.resolve(),
@@ -135,10 +138,16 @@ async function makeApp({ audioEnabled = false, suspended = false, browser = fals
   class Detector {
     startPolling(
       capture: typeof state.capture,
-      onEmpty: typeof state.onEmpty,
+      onEmpty: (capturedAt: number) => void,
       minimumInterval: typeof state.minimumInterval,
+      onRead: typeof state.onRead,
     ) {
-      Object.assign(state, { capture, onEmpty, minimumInterval });
+      Object.assign(state, {
+        capture,
+        onEmpty: (capturedAt = state.now) => onEmpty(capturedAt),
+        minimumInterval,
+        onRead,
+      });
     }
   }
   const alt1 = {
@@ -187,15 +196,7 @@ async function makeApp({ audioEnabled = false, suspended = false, browser = fals
   const requireModule = (path: string) => {
     if (path === "./audio") return audioExports;
     if (path === "./hp") return { EmptyHpDetector: Detector };
-    if (path === "./timer") {
-      return {
-        ...timer,
-        sectionPercentages(seconds: number) {
-          state.percentageCalls++;
-          return timer.sectionPercentages(seconds);
-        },
-      };
-    }
+    if (path === "./timer") return timer;
     if (path === "alt1") {
       return {
         webpackImages: () => ({ promise: Promise.resolve() }),
@@ -243,7 +244,7 @@ test("a new empty edge after the deadline starts a timer even if rendering has n
   assert.equal(app.raf.size, 1);
   app.state.now = 24602;
   app.render();
-  assert.equal(app.get("remaining_time").textContent, "22.8s");
+  assert.equal(app.get("remaining_time").textContent, "23.4s");
 });
 
 test("empty events before the deadline do not restart an active countdown", async () => {
@@ -252,25 +253,74 @@ test("empty events before the deadline do not restart an active countdown", asyn
   app.state.now = 1000;
   app.state.onEmpty();
   app.render();
-  assert.equal(app.get("remaining_time").textContent, "22.8s");
+  assert.equal(app.get("remaining_time").textContent, "23.4s");
   assert.equal(app.raf.size, 1);
 });
 
-test("unchanged snapped time skips display calculations and bars use transforms", async () => {
+test("unchanged rounded time skips text writes while bars follow actual time", async () => {
   const app = await makeApp();
   app.state.onEmpty();
   app.state.now = 1;
   app.render();
-  const calls = app.state.percentageCalls;
+  const progress = app.get("preUltBar").style.transform;
   const writes = app.get("remaining_time").textWrites;
   app.state.now = 2;
   app.render();
-  assert.equal(app.state.percentageCalls, calls);
+  assert.notEqual(app.get("preUltBar").style.transform, progress);
   assert.equal(app.get("remaining_time").textWrites, writes);
   assert.match(app.get("preUltBar").style.transform!, /^scaleX\(/);
   app.state.now = 601;
   app.render();
-  assert.equal(app.state.percentageCalls, calls + 1);
+  assert.equal(app.get("remaining_time").textWrites, writes + 1);
+});
+
+test("delayed detection anchors visual and audio timing to the captured frame", async () => {
+  const app = await makeApp({ audioEnabled: true });
+  app.state.now = 784;
+  app.state.onEmpty(0);
+  assert.equal(app.get("remaining_time").textContent, "23.4s");
+  assert.ok(Math.abs(app.oscillators[0].starts[0] - 32.616) < 1e-9);
+  app.state.now = 24000;
+  app.render();
+  assert.equal(app.get("remaining_time").textContent, "0.0s");
+  assert.equal(app.raf.size, 0);
+});
+
+test("a stale empty edge cannot start a countdown after the active timer expires", async () => {
+  const app = await makeApp({ audioEnabled: true });
+  app.state.onEmpty();
+  app.state.now = 24100;
+  app.state.onEmpty(23900);
+  app.render();
+  assert.equal(app.oscillators.length, 1);
+  assert.equal(app.get("remaining_time").textContent, "0.0s");
+  assert.equal(app.raf.size, 0);
+
+  const idle = await makeApp({ audioEnabled: true });
+  idle.state.now = 25000;
+  idle.state.onEmpty(0);
+  assert.equal(idle.oscillators.length, 0);
+  assert.equal(idle.raf.size, 0);
+});
+
+test("bars and countdown do not reach action boundaries before the deadline", async () => {
+  const app = await makeApp();
+  app.state.onEmpty();
+  for (const [remaining, bar, label] of [
+    [10.19, "preUltBar", "10.2s"],
+    [1.19, "postUltBar", "1.2s"],
+    [0.09, "tcBar", "0.1s"],
+  ] as const) {
+    app.state.now = 24000 - remaining * 1000;
+    app.render();
+    assert.notEqual(app.get(bar).style.transform, "scaleX(1)");
+    assert.equal(app.get("remaining_time").textContent, label);
+    const expected = timer.sectionPercentages(remaining);
+    for (const [i, section] of timer.SECTIONS.entries()) {
+      const fill = Number(app.get(section.id).style.transform!.slice(7, -1));
+      assert.ok(Math.abs(fill - expected[i] / 100) < 1e-9);
+    }
+  }
 });
 
 test("completed bars reset and restarting cancels the previous reset", async () => {
@@ -526,6 +576,7 @@ test("unavailable capture is reported without making native calls, and loss of f
   app.alt1.permissionPixel = true;
   assert.ok(app.state.capture(null));
   assert.equal(app.captures.length, 1);
+  app.state.onRead(null);
   assert.equal(app.get("captureStatus").hidden, true);
   assert.equal(app.alt1.rsActive, false);
   assert.equal(app.state.minimumInterval(), 40);
@@ -562,6 +613,19 @@ test("native capture errors remain visible until capture succeeds", async () => 
   assert.equal(app.get("captureStatus").hidden, false);
   app.state.captureUnavailable = false;
   app.state.capture(null);
+  assert.equal(app.get("captureStatus").hidden, false);
+  app.state.onRead(null);
+  assert.equal(app.get("captureStatus").hidden, true);
+});
+
+test("pixel-read errors stay visible until a complete successful read", async () => {
+  const app = await makeApp();
+  app.state.onRead(new Error("native tile transfer failed"));
+  assert.match(app.get("captureStatus").textContent, /HP detection failed/);
+  assert.equal(app.get("captureStatus").hidden, false);
+  assert.ok(app.state.capture(null));
+  assert.equal(app.get("captureStatus").hidden, false);
+  app.state.onRead(null);
   assert.equal(app.get("captureStatus").hidden, true);
 });
 

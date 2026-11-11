@@ -152,10 +152,12 @@ test("changing scale reacquires the bar without retriggering a continuously empt
   assert.equal(detector.detect(new ImgRefData(await resize(empty, 1.5, "cubic"))), true);
 });
 
-test("small scale changes at the same name position update the tracking geometry", async () => {
+test("shrinking and growing scales at the same name position update the tracking geometry", async () => {
   const [templates, empty] = await fixtures;
   const detector = new EmptyHpDetector(templates);
-  for (const [index, scale] of [1.25, 1.2, 1.1, 0.9, 0.8, 0.75].entries()) {
+  for (const [index, scale] of [
+    1.25, 1.2, 1.1, 0.9, 0.8, 0.75, 0.8, 0.9, 1.1, 1.2, 1.25, 1.5, 2, 3,
+  ].entries()) {
     const frame = new ImgRefData(
       await resize(empty, scale, "cubic"),
       1000 - Math.round(213 * scale),
@@ -294,7 +296,7 @@ test("missing bars back off broad searches to 1, 2, then 4 seconds while checkin
   assert.equal(fullCaptures(), fullCount + 2, "successful tracking resets the backoff");
 });
 
-test("incremental scaled reacquisition preserves the empty edge and resumes scaled tracking", async (t) => {
+test("nearby scaled reacquisition avoids broad searches and preserves the empty edge", async (t) => {
   const [templates, empty, populated] = await fixtures;
   const detector = new EmptyHpDetector(templates);
   const depleted = await resize(empty, 1.5, "cubic");
@@ -306,9 +308,9 @@ test("incremental scaled reacquisition preserves the empty edge and resumes scal
 
   frame = new NativeLikeImage(place(depleted, 50, 10));
   tick(25);
-  assert.equal(frame.reads.length, 2, "read the old name position and only the first tile");
-  assert.equal(onEmpty.mock.callCount(), 1);
-  tick(16);
+  assert.equal(frame.searches, 0, "reuse the last scale before searching the full window");
+  assert.equal(frame.reads.length, 4, "read the old name, nearby region, and two HP regions");
+  assert.ok(frame.reads.every(({ width, height }) => width * height * 4 < 1024 * 1024));
   assert.ok(detector.captureArea);
   assert.equal(onEmpty.mock.callCount(), 1, "a moved empty bar must not retrigger");
 
@@ -318,6 +320,22 @@ test("incremental scaled reacquisition preserves the empty edge and resumes scal
   frame = new NativeLikeImage(depleted);
   tick(25);
   assert.equal(onEmpty.mock.callCount(), 2, "a new empty edge still triggers");
+});
+
+test("nearby native and 300% bars reacquire in game coordinates without a broad search", async () => {
+  const [templates, empty] = await fixtures;
+  for (const scale of [1, 3]) {
+    const detector = new EmptyHpDetector(templates);
+    const pixels = await resize(empty, scale, "cubic");
+    const initial = new NativeLikeImage(place(pixels, 0, 0), 100, 50);
+    assert.equal(detector.detect(initial), true);
+    const previous = detector.captureArea!;
+    const moved = new NativeLikeImage(place(pixels, 40, 30), 100, 50);
+    assert.equal(detector.detect(moved), false);
+    assert.equal(moved.searches, 0);
+    assert.deepEqual(detector.captureArea, { ...previous, x: previous.x + 40, y: previous.y + 30 });
+    assert.equal(moved.reads.length, 4);
+  }
 });
 
 test("4K polling yields between tiles and never replaces an in-flight native snapshot", async (t) => {
@@ -363,6 +381,8 @@ test("4K polling yields between tiles and never replaces an in-flight native sna
   }
   assert.equal(onEmpty.mock.callCount(), 1);
   assert.ok(detector.captureArea);
+  assert.equal(onEmpty.mock.calls[0].arguments[0], 0, "report capture time, not scan completion");
+  assert.ok(performance.now() > 600, "the search spans more than one game tick");
   tick(39);
   assert.equal(snapshots.length, 1);
   tick(1);
@@ -386,7 +406,7 @@ test("a failed search slice remains visible and retries without committing a par
     callback();
   };
   const error = new Error("native tile transfer failed");
-  const frame = new NativeLikeImage(place(scaled, 50, 10));
+  const frame = new NativeLikeImage(place(scaled, 250, 10));
   const read = frame.read.bind(frame);
   let failed = true;
   t.mock.method(frame, "read", (x = 0, y = 0, width = frame.width, height = frame.height) => {
@@ -395,10 +415,15 @@ test("a failed search slice remains visible and retries without committing a par
   });
   const capture = t.mock.fn(() => frame);
   const onEmpty = t.mock.fn();
-  detector.startPolling(capture, onEmpty);
+  const onRead = t.mock.fn();
+  detector.startPolling(capture, onEmpty, () => 0, onRead);
   assert.deepEqual(detector.captureArea, lastArea);
   assert.equal(schedule.mock.calls.at(-1)!.arguments[1], 16);
   assert.throws(runNext, error);
+  assert.deepEqual(
+    onRead.mock.calls.map((call) => call.arguments),
+    [[error]],
+  );
   assert.equal(schedule.mock.calls.at(-1)!.arguments[1], 100);
   assert.deepEqual(detector.captureArea, lastArea);
   assert.equal(onEmpty.mock.callCount(), 0);
@@ -408,6 +433,25 @@ test("a failed search slice remains visible and retries without committing a par
   assert.equal(capture.mock.callCount(), 2);
   assert.notDeepEqual(detector.captureArea, lastArea);
   assert.equal(onEmpty.mock.callCount(), 0);
+  assert.equal(onRead.mock.calls.at(-1)!.arguments[0], null);
+});
+
+test("full-window fallback reports its own capture timestamp, excluding capture latency", async (t) => {
+  const [templates, empty, populated] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  detector.detect(new ImgRefData(populated));
+  const tick = pollingClock(t);
+  const capture = (area: RectLike | null) => {
+    tick(area ? 10 : 20);
+    return area
+      ? new NativeLikeImage(new ImageData(area.width, area.height), area.x, area.y)
+      : new NativeLikeImage(empty);
+  };
+  const onEmpty = t.mock.fn();
+  detector.startPolling(capture, onEmpty);
+  assert.equal(performance.now(), 30);
+  assert.equal(onEmpty.mock.callCount(), 1);
+  assert.equal(onEmpty.mock.calls[0].arguments[0], 10);
 });
 
 function fill(
@@ -843,8 +887,10 @@ test("failed full-window fallback preserves the empty edge and uses the slower r
   });
   const onEmpty = t.mock.fn();
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  detector.startPolling(capture, onEmpty);
+  const onRead = t.mock.fn();
+  detector.startPolling(capture, onEmpty, () => 0, onRead);
   assert.equal(capture.mock.callCount(), 2);
+  assert.equal(onRead.mock.callCount(), 0, "do not clear a failed fallback's warning");
   assert.deepEqual(detector.captureArea, area);
   t.mock.timers.tick(99);
   assert.equal(capture.mock.callCount(), 2);
@@ -852,6 +898,10 @@ test("failed full-window fallback preserves the empty edge and uses the slower r
   t.mock.timers.tick(1);
   assert.equal(capture.mock.callCount(), 3);
   assert.equal(onEmpty.mock.callCount(), 0);
+  assert.deepEqual(
+    onRead.mock.calls.map((call) => call.arguments),
+    [[null]],
+  );
 });
 
 test("polling respects a changing Alt1 minimum interval in tracking and search modes", async (t) => {

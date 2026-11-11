@@ -20,7 +20,9 @@ automatically. Follow the sections from left to right:
 | `tc`       | Target cycle back to Vorago.          |
 
 The `ult` and `tc` windows count down in tenths of a second to help you time
-your inputs. Tick **Play audio cue on tc** if you'd like a beep when the TC
+your inputs. The bars follow actual elapsed time; the countdown rounds up so it
+doesn't announce a window or completion early.
+Tick **Play audio cue on tc** if you'd like a beep when the TC
 window starts. Your choice is remembered next time you open the app.
 
 ## Install
@@ -50,7 +52,10 @@ of the populated and empty HP bar, along with your Windows and RuneScape scaling
 
 When the bar is missing, full-window searches pause for up to four seconds between
 scans to reduce capture load. The last known position is still checked frequently;
-reacquiring a moved bar can take a few seconds. Normal fast tracking resumes once found.
+nearby movement is searched before scanning the whole window. Reacquiring a
+distant moved bar can take a few seconds. Normal fast tracking resumes once found.
+The timer and audio cue use the captured frame's timestamp, so processing that
+frame does not shift the action windows later.
 
 Automatic detection cannot fix a blank or incorrectly scaled capture from Alt1 itself.
 Check the preview in Alt1's Capture settings and follow
