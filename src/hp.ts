@@ -248,6 +248,7 @@ export class EmptyHpDetector {
     };
     const poll = () => {
       let interval = SEARCH_INTERVAL;
+      let completedTrackingRead = false;
       try {
         if (!scan) {
           minimum = 0;
@@ -274,6 +275,7 @@ export class EmptyHpDetector {
         }
         if (captureAvailable) onRead(null);
         if (step.value) onEmpty(capturedAt);
+        completedTrackingRead = this.tracking;
       } catch (error) {
         scan = null;
         onRead(error);
@@ -281,7 +283,12 @@ export class EmptyHpDetector {
       } finally {
         // Alt1 has one bound image per app: never recapture between search slices.
         // Yield without swallowing errors or starting overlapping scans.
-        setTimeout(poll, scan ? SEARCH_SLICE_INTERVAL : Math.max(interval, minimum));
+        // Successful tracking counts capture/read time toward the next capture.
+        const elapsed = completedTrackingRead ? performance.now() - capturedAt : 0;
+        setTimeout(
+          poll,
+          scan ? SEARCH_SLICE_INTERVAL : Math.max(1, Math.max(interval, minimum) - elapsed),
+        );
       }
     };
     poll();
