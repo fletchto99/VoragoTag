@@ -39,3 +39,9 @@ The image tests use these reference screenshots:
 
 - [Populated HP bar](https://cloud.fletchto99.com/s/ioACESzZnyFPFn4/preview)
 - [Empty HP bar](https://cloud.fletchto99.com/s/M4gBH5bmRcdLrRC/preview)
+
+The HP tests independently resize whole captures with Sharp's nearest-neighbour
+and cubic filters. They cover supported scales, fractional alignment, cropped
+tracking, scale changes, and rejection of visible HP fill or numbers.
+These simulated captures do not replace testing real Alt1 captures from
+different Windows DPI and RuneScape interface settings.

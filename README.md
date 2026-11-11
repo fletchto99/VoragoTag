@@ -35,9 +35,22 @@ You can also try **Start demo timer** on the website before installing.
 
 - Keep Vorago's HP bar visible and allow Alt1 to read the game screen.
 - The timer starts once per empty bar; you don't need to reset it manually.
-- The HP bar can move, but different interface scaling may stop it being recognised.
+- The HP bar can move. The app automatically recognises common captured bar scales:
+  75%, 80%, 90%, 100%, 110%, 120%, 125%, 150%, 175%, 200%, 225%, 250%, 275%, and 300%.
+  It remembers the matched scale while tracking; no scale setting is needed.
 - If the app can't read the game or play audio, it shows a message explaining what's wrong.
 - **The Scopulus phase is not supported.** The timer relies on Vorago's HP bar becoming empty.
+
+### Scaling and capture troubleshooting
+
+The captured bar's scale may differ from your Windows display-scaling setting.
+Custom scales or differently rendered game interfaces may still need additional
+reference images. If detection fails, keep an original-resolution Alt1 capture
+of the populated and empty HP bar, along with your Windows and RuneScape scaling settings.
+
+Automatic detection cannot fix a blank or incorrectly scaled capture from Alt1 itself.
+Check the preview in Alt1's Capture settings and follow
+[Alt1's capture troubleshooting guide](https://runeapps.org/help_alt1_capture).
 
 ## Contributing
 

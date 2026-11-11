@@ -29,13 +29,135 @@ function copy(image: ImageData): ImageData {
 }
 
 function place(image: ImageData, x: number, y: number): ImageData {
-  const frame = new ImageData(900, 300);
+  const frame = new ImageData(Math.max(900, x + image.width), Math.max(300, y + image.height));
   for (let row = 0; row < image.height; row++) {
     const pixels = image.data.subarray(row * image.width * 4, (row + 1) * image.width * 4);
     frame.data.set(pixels, ((row + y) * frame.width + x) * 4);
   }
   return frame;
 }
+
+async function resize(image: ImageData, scale: number, kernel: "nearest" | "cubic") {
+  const { data, info } = await sharp(image.data, {
+    raw: { width: image.width, height: image.height, channels: 4 },
+  })
+    .resize(Math.round(image.width * scale), Math.round(image.height * scale), { kernel })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return new ImageData(new Uint8ClampedArray(data), info.width, info.height);
+}
+
+test("scaled captures distinguish empty and populated bars", async (t) => {
+  const [templates, empty, populated] = await fixtures;
+  for (const scale of [0.75, 0.8, 0.9, 1.1, 1.2, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3]) {
+    for (const kernel of ["nearest", "cubic"] as const) {
+      await t.test(`${Math.round(scale * 100)}% ${kernel}`, async () => {
+        const detector = new EmptyHpDetector(templates);
+        const active = new ImgRefData(await resize(populated, scale, kernel));
+        const depleted = new ImgRefData(await resize(empty, scale, kernel));
+        assert.equal(detector.detect(active), false);
+        assert.notEqual(detector.captureArea, null, "locates a populated bar");
+        assert.equal(detector.detect(depleted), true);
+        assert.equal(detector.detect(depleted), false);
+      });
+    }
+  }
+});
+
+test("scaled low HP and HP numbers do not trigger", async (t) => {
+  const [templates, empty, populated] = await fixtures;
+  const numbered = copy(empty);
+  for (let y = 44; y < 60; y++) {
+    for (let x = 274; x < 280; x++) {
+      const source = ((y + 1) * populated.width + x + 5) * 4;
+      numbered.data.set(populated.data.subarray(source, source + 4), (y * numbered.width + x) * 4);
+    }
+  }
+  for (const scale of [0.75, 0.8, 0.9, 1.1, 1.2, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3]) {
+    const low = copy(empty);
+    // Keep at least one captured pixel; downscaling can erase a source column entirely.
+    fill(low, 37, 41, Math.ceil(1 / scale), 21, [0, 180, 0, 255]);
+    for (const kernel of ["nearest", "cubic"] as const) {
+      await t.test(`${Math.round(scale * 100)}% ${kernel}`, async () => {
+        for (const frame of [low, numbered]) {
+          const detector = new EmptyHpDetector(templates);
+          const image = new ImgRefData(await resize(frame, scale, kernel));
+          assert.equal(detector.detect(image), false);
+          assert.notEqual(detector.captureArea, null);
+        }
+      });
+    }
+  }
+});
+
+test("scaled captures require both the Vorago name and the empty bar", async () => {
+  const [templates, empty] = await fixtures;
+  const noName = copy(empty);
+  fill(noName, 213, 20, 80, 15, [20, 29, 31, 255]);
+  const noBar = copy(empty);
+  fill(noBar, 33, 40, 439, 24, [20, 29, 31, 255]);
+  for (const scale of [0.8, 1.25, 1.5, 2, 3]) {
+    for (const frame of [noName, noBar]) {
+      const detector = new EmptyHpDetector(templates);
+      assert.equal(detector.detect(new ImgRefData(await resize(frame, scale, "cubic"))), false);
+    }
+  }
+});
+
+test("scaled tracking uses cropped game coordinates and survives fractional alignment", async (t) => {
+  const [templates, empty] = await fixtures;
+  for (const [scale, x, y] of [
+    [0.8, 9, 17],
+    [1.25, 1, 1],
+    [1.5, 9, 17],
+    [2, 270, 130],
+  ]) {
+    for (const kernel of ["nearest", "cubic"] as const) {
+      await t.test(`${scale} at ${x},${y} ${kernel}`, async () => {
+        const detector = new EmptyHpDetector(templates);
+        const pixels = await resize(place(empty, x, y), scale, kernel);
+        const frame = new ImgRefData(pixels, 100, 50);
+        assert.equal(detector.detect(frame), true);
+        const area = detector.captureArea!;
+        const cropped = new TrackedImage(
+          frame.read(area.x - frame.x, area.y - frame.y, area.width, area.height),
+          area.x,
+          area.y,
+        );
+        assert.equal(detector.detect(cropped), false);
+        assert.equal(cropped.searches, 0);
+        assert.deepEqual(detector.captureArea, area);
+        assert.ok(cropped.reads.every((read) => read.width <= Math.ceil(80 * scale)));
+      });
+    }
+  }
+});
+
+test("changing scale reacquires the bar without retriggering a continuously empty bar", async () => {
+  const [templates, empty, populated] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  for (const [index, scale] of [1, 1.25, 1.5, 2, 0.8, 1].entries()) {
+    const frame = new ImgRefData(await resize(empty, scale, "cubic"));
+    assert.equal(detector.detect(frame), index === 0);
+    assert.ok(detector.captureArea);
+  }
+  assert.equal(detector.detect(new ImgRefData(await resize(populated, 1.5, "cubic"))), false);
+  assert.equal(detector.detect(new ImgRefData(await resize(empty, 1.5, "cubic"))), true);
+});
+
+test("small scale changes at the same name position update the tracking geometry", async () => {
+  const [templates, empty] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  for (const [index, scale] of [1.25, 1.2, 1.1, 0.9, 0.8, 0.75].entries()) {
+    const frame = new ImgRefData(
+      await resize(empty, scale, "cubic"),
+      1000 - Math.round(213 * scale),
+      200 - Math.round(20 * scale),
+    );
+    assert.equal(detector.detect(frame), index === 0);
+    assert.ok(Math.abs(detector.captureArea!.width - (276 * scale + 2)) <= 1);
+  }
+});
 
 class TrackedImage extends ImgRefData {
   searches = 0;
