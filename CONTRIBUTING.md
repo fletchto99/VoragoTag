@@ -14,6 +14,20 @@ npm run format
 
 Open `dist/index.html` to try the browser demo. Pushes to `main` deploy to GitHub Pages.
 
+CI installs the latest npm 11 release before installing dependencies and running
+`npm audit signatures`. Node 22's bundled npm 10 can incorrectly reject keyless
+attestations with `EMISSINGSIGNATUREKEY`; npm 11 includes the
+[upstream fix](https://github.com/npm/pacote/pull/454). Signature and provenance
+verification remain required. To use the same verifier locally, run
+`npx --yes npm@11 audit signatures` after `npm ci`.
+
+Dependabot updates project dependencies and GitHub Actions weekly. The CI npm
+version follows 11.x automatically rather than relying on Dependabot.
+TypeScript stays on 6.0.x until typescript-eslint supports 6.1 or newer.
+The `minimatch@10` override uses patched 11.x releases to address
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249).
+Remove it once the lint dependencies accept patched minimatch versions themselves.
+
 ## Update the README screenshot
 
 Install the screenshot browser once:
