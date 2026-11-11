@@ -244,7 +244,7 @@ test("a new empty edge after the deadline starts a timer even if rendering has n
   assert.equal(app.raf.size, 1);
   app.state.now = 24602;
   app.render();
-  assert.equal(app.get("remaining_time").textContent, "23.4s");
+  assert.equal(app.get("remaining_time").textContent, "22.8s");
 });
 
 test("empty events before the deadline do not restart an active countdown", async () => {
@@ -253,7 +253,7 @@ test("empty events before the deadline do not restart an active countdown", asyn
   app.state.now = 1000;
   app.state.onEmpty();
   app.render();
-  assert.equal(app.get("remaining_time").textContent, "23.4s");
+  assert.equal(app.get("remaining_time").textContent, "22.8s");
   assert.equal(app.raf.size, 1);
 });
 
@@ -268,12 +268,13 @@ test("bars and countdown hold between game ticks in the pre-ult and post-ult sec
     app.render();
     const writes = app.get("remaining_time").textWrites;
     for (const [elapsed, completedTicks] of [
-      [1, 0],
-      [599, 0],
+      [1, 1],
+      [599, 1],
       [600, 1],
-      [601, 1],
-      [1199, 1],
+      [601, 2],
+      [1199, 2],
       [1200, 2],
+      [1201, 3],
     ]) {
       app.state.now = start + elapsed;
       app.render();
@@ -292,12 +293,14 @@ test("ult and tc bars retain discrete tenth-second steps", async () => {
     ["tcBar", 23400],
   ] as const) {
     for (const [elapsed, completedSteps] of [
-      [1, 0],
-      [99, 0],
+      [1, 1],
+      [99, 1],
       [100, 1],
-      [199, 1],
+      [101, 2],
+      [199, 2],
       [200, 2],
-      [599, 5],
+      [201, 3],
+      [599, 6],
       [600, 6],
     ]) {
       app.state.now = start + elapsed;
@@ -312,15 +315,15 @@ test("delayed detection anchors visual and audio timing to the captured frame", 
   const app = await makeApp({ audioEnabled: true });
   app.state.now = 784;
   app.state.onEmpty(0);
-  assert.equal(app.get("remaining_time").textContent, "23.4s");
+  assert.equal(app.get("remaining_time").textContent, "22.8s");
   assert.ok(Math.abs(app.oscillators[0].starts[0] - 32.616) < 1e-9);
   for (const [now, completedTicks, label] of [
-    [784, 1, "23.4s"],
-    [1199, 1, "23.4s"],
+    [784, 2, "22.8s"],
+    [1199, 2, "22.8s"],
     [1200, 2, "22.8s"],
-    [1799, 2, "22.8s"],
+    [1799, 3, "22.2s"],
     [1800, 3, "22.2s"],
-    [3599, 5, "21.0s"],
+    [3599, 6, "20.4s"],
     [3600, 6, "20.4s"],
   ] as const) {
     app.state.now = now;
@@ -352,23 +355,41 @@ test("a stale empty edge cannot start a countdown after the active timer expires
   assert.equal(idle.raf.size, 0);
 });
 
-test("bars and countdown do not reach action boundaries before the deadline", async () => {
-  const app = await makeApp();
-  app.state.onEmpty();
-  for (const [remaining, bar, label] of [
-    [10.19, "preUltBar", "10.2s"],
-    [1.19, "postUltBar", "1.2s"],
-    [0.09, "tcBar", "0.1s"],
-  ] as const) {
-    app.state.now = 24000 - remaining * 1000;
-    app.render();
-    assert.notEqual(app.get(bar).style.transform, "scaleX(1)");
-    assert.equal(app.get("remaining_time").textContent, label);
-    const expected = timer.sectionPercentages(Number.parseFloat(label));
-    for (const [i, section] of timer.SECTIONS.entries()) {
-      const fill = Number(app.get(section.id).style.transform!.slice(7, -1));
-      assert.ok(Math.abs(fill - expected[i] / 100) < 1e-9);
+test("v1.0.3 stepping fills coarse bars a tick ahead without moving TC or audio deadlines", async () => {
+  for (const capturedAt of [0, 123.25]) {
+    const app = await makeApp({ audioEnabled: true });
+    app.state.now = capturedAt;
+    app.state.onEmpty(capturedAt);
+    for (const [elapsed, bar, nextBar, label] of [
+      [13801, "preUltBar", "UltBar", "9.6s"],
+      [14399, "preUltBar", "UltBar", "9.6s"],
+      [22801, "postUltBar", "tcBar", "0.6s"],
+      [23399, "postUltBar", "tcBar", "0.6s"],
+    ] as const) {
+      app.state.now = capturedAt + elapsed;
+      app.render();
+      const fill = Number(app.get(bar).style.transform!.slice(7, -1));
+      assert.ok(Math.abs(fill - 1) < 1e-9);
+      assert.equal(app.get(nextBar).style.transform, "scaleX(0)");
+      assert.equal(app.get("remaining_time").textContent, label);
     }
+
+    app.state.now = capturedAt + 23401;
+    app.render();
+    const tcFill = Number(app.get("tcBar").style.transform!.slice(7, -1));
+    assert.ok(Math.abs(tcFill - 1 / 6) < 1e-9);
+    assert.equal(app.oscillators.length, 1);
+    assert.deepEqual(app.oscillators[0].starts, [33.4]);
+
+    app.state.now = capturedAt + 23999;
+    app.render();
+    assert.equal(app.get("remaining_time").textContent, "0.0s");
+    assert.equal(app.raf.size, 1, "rounded zero is not the actual countdown deadline");
+    assert.equal(app.timeouts.size, 0);
+    app.state.now = capturedAt + 24000;
+    app.render();
+    assert.equal(app.raf.size, 0);
+    assert.equal(app.timeouts.size, 1);
   }
 });
 

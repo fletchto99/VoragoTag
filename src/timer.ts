@@ -46,11 +46,12 @@ export function activeSection(remaining: number): Section {
   return SECTIONS[0];
 }
 
-// Round up so the countdown never announces a window boundary before it arrives.
+// Preserve the original leading-tick display: coarse bars fill during the tick
+// before the next action window. Display rounding does not move that deadline.
 export function snapRemainingSeconds(rawSecs: number): number {
   const secs = Math.max(0, rawSecs);
   const step = secs <= 0 ? SECTIONS[0].step : activeSection(secs).step;
-  return Math.max(0, Math.ceil(secs / step - 1e-9) * step);
+  return Math.floor(secs / step + 1e-9) * step;
 }
 
 // Given the snapped remaining seconds, return the fill percentage for each

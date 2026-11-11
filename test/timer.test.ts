@@ -56,34 +56,42 @@ test("activeSection maps remaining time to the right section", () => {
   assert.equal(label(30), "pre-ult");
 });
 
-test("snapRemainingSeconds rounds up to 0.6s game ticks outside the fine windows", () => {
+test("snapRemainingSeconds rounds down to 0.6s game ticks outside the fine windows", () => {
   assert.equal(snapRemainingSeconds(15.0), 15.0);
-  assert.equal(snapRemainingSeconds(14.5), 15.0);
+  assert.ok(Math.abs(snapRemainingSeconds(14.5) - 14.4) < 1e-9);
   // Mid post-ult, still 0.6s steps.
-  assert.ok(Math.abs(snapRemainingSeconds(5.0) - 5.4) < 1e-9);
+  assert.ok(Math.abs(snapRemainingSeconds(5.0) - 4.8) < 1e-9);
 });
 
 test("snapRemainingSeconds uses fine 0.1s steps within the ult window", () => {
   // Ult window is (9.0, 9.6].
-  assert.ok(Math.abs(snapRemainingSeconds(9.55) - 9.6) < 1e-9);
+  assert.ok(Math.abs(snapRemainingSeconds(9.55) - 9.5) < 1e-9);
   assert.ok(Math.abs(snapRemainingSeconds(9.6) - 9.6) < 1e-9);
   // Just below the ult window we are back to 0.6s ticks.
-  assert.ok(Math.abs(snapRemainingSeconds(8.9) - 9.0) < 1e-9);
+  assert.ok(Math.abs(snapRemainingSeconds(8.9) - 8.4) < 1e-9);
 });
 
 test("snapRemainingSeconds uses fine 0.1s steps within the tc window", () => {
   // tc window is the final 0.6 seconds: (0, 0.6].
   assert.ok(Math.abs(snapRemainingSeconds(0.6) - 0.6) < 1e-9);
-  assert.ok(Math.abs(snapRemainingSeconds(0.55) - 0.6) < 1e-9);
-  assert.ok(Math.abs(snapRemainingSeconds(0.15) - 0.2) < 1e-9);
+  assert.ok(Math.abs(snapRemainingSeconds(0.55) - 0.5) < 1e-9);
+  assert.ok(Math.abs(snapRemainingSeconds(0.15) - 0.1) < 1e-9);
   // Just above the tc window snaps to the 0.6s tick.
-  assert.ok(Math.abs(snapRemainingSeconds(0.65) - 1.2) < 1e-9);
+  assert.ok(Math.abs(snapRemainingSeconds(0.65) - 0.6) < 1e-9);
 });
 
-test("rounding does not announce a window or completion early", () => {
-  for (const boundary of [9.6, 0.6, 0]) {
-    assert.ok(snapRemainingSeconds(boundary + 0.001) > boundary);
-    assert.ok(Math.abs(snapRemainingSeconds(boundary) - boundary) < 1e-9);
+test("v1.0.3 rounding leads the display without selecting the next section early", () => {
+  for (const [remaining, displayed] of [
+    [9.601, 9.6],
+    [9.6, 9.6],
+    [9.599, 9.5],
+    [0.601, 0.6],
+    [0.6, 0.6],
+    [0.599, 0.5],
+    [0.099, 0],
+    [0, 0],
+  ]) {
+    assert.ok(Math.abs(snapRemainingSeconds(remaining) - displayed) < 1e-9);
   }
 });
 
