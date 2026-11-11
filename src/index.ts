@@ -69,11 +69,11 @@ audioCueCheckbox.addEventListener("change", () => {
   audioCue.setEnabled(audioCueCheckbox.checked);
 });
 
-function startVoragoTimer() {
+function startVoragoTimer(capturedAt = performance.now()) {
   // A new run cancels any pending post-fill reset so it can't wipe the bars
   // mid-countdown.
   clearPendingReset();
-  endTime = performance.now() + TOTAL_TIME * 1000;
+  endTime = capturedAt + TOTAL_TIME * 1000;
   audioCue.start(endTime, audioCueCheckbox.checked);
   stopVoragoTimer();
   updateVoragoTimer();
@@ -111,12 +111,12 @@ function updateVoragoTimer() {
   if (secsNum !== lastSeconds) {
     lastSeconds = secsNum;
     remainingTimeEl.textContent = secsNum.toFixed(1) + "s";
-    const percentages = sectionPercentages(secsNum);
-    for (let i = 0; i < barEls.length; i++) {
-      if (percentages[i] !== lastPercentages[i]) {
-        barEls[i].style.transform = `scaleX(${percentages[i] / 100})`;
-        lastPercentages[i] = percentages[i];
-      }
+  }
+  const percentages = sectionPercentages(remainingSecs);
+  for (let i = 0; i < barEls.length; i++) {
+    if (percentages[i] !== lastPercentages[i]) {
+      barEls[i].style.transform = `scaleX(${percentages[i] / 100})`;
+      lastPercentages[i] = percentages[i];
     }
   }
 
@@ -150,7 +150,7 @@ function captureHp(area: a1lib.RectLike | null): a1lib.ImgRef | null {
     const image = fits
       ? a1lib.captureHold(area.x, area.y, area.width, area.height)
       : a1lib.captureHoldFullRs();
-    setStatus(captureStatusEl, image ? "" : "RuneScape capture failed. Retrying.");
+    if (!image) setStatus(captureStatusEl, "RuneScape capture failed. Retrying.");
     return image;
   } catch (error) {
     setStatus(captureStatusEl, "RuneScape capture failed. Retrying.");
@@ -166,10 +166,17 @@ if (window.alt1) {
     const detector = new EmptyHpDetector(imgs);
     detector.startPolling(
       captureHp,
-      () => {
-        if (performance.now() >= endTime) startVoragoTimer();
+      (capturedAt) => {
+        if (capturedAt >= endTime && performance.now() < capturedAt + TOTAL_TIME * 1000) {
+          startVoragoTimer(capturedAt);
+        }
       },
       () => alt1.captureInterval,
+      (error) =>
+        setStatus(
+          captureStatusEl,
+          error === null ? "" : "RuneScape HP detection failed. Retrying.",
+        ),
     );
   });
 } else {
@@ -187,5 +194,5 @@ if (window.alt1) {
   // timer without the game running.
   const demoBtn = document.getElementById("demoBtn") as HTMLButtonElement;
   demoBtn.style.display = "block";
-  demoBtn.addEventListener("click", startVoragoTimer);
+  demoBtn.addEventListener("click", () => startVoragoTimer());
 }

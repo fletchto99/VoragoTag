@@ -1,4 +1,11 @@
-import { ImageData, simpleCompare, type ImgRef, type PointLike, type RectLike } from "alt1";
+import {
+  ImageData,
+  ImgRefData,
+  simpleCompare,
+  type ImgRef,
+  type PointLike,
+  type RectLike,
+} from "alt1";
 
 interface DetectionImages {
   voragoName: ImageData;
@@ -17,6 +24,7 @@ const MAX_SEARCH_BACKOFF = 4000;
 const SEARCH_SLICE_INTERVAL = 16;
 const SEARCH_TILE_WIDTH = 1024;
 const SEARCH_TILE_HEIGHT = 256;
+const NEARBY_SEARCH_RADIUS = 64;
 // Mean summed RGB error tolerates resampling without making every text edge optional.
 const MAX_NAME_ERROR = 75;
 const MAX_SAMPLE_ERROR = 100;
@@ -35,6 +43,15 @@ interface NameMatch {
   position: PointLike;
   images: ScaledImages;
   score: number;
+}
+
+function isExactCapture(image: ImgRef, area: RectLike): boolean {
+  return (
+    image.x === area.x &&
+    image.y === area.y &&
+    image.width === area.width &&
+    image.height === area.height
+  );
 }
 
 function nameSignature(image: ImageData) {
@@ -176,34 +193,37 @@ export class EmptyHpDetector {
     this.images = this.templates[0];
   }
 
-  private offset(point: PointLike): PointLike {
+  private offset(point: PointLike, scale = this.images.scale): PointLike {
     return {
-      x: Math.round(point.x * this.images.scale),
-      y: Math.round(point.y * this.images.scale),
+      x: Math.round(point.x * scale),
+      y: Math.round(point.y * scale),
     };
   }
 
   get captureArea(): RectLike | null {
-    if (!this.position) return null;
-    const left = this.offset(LEFT_EDGE_OFFSET);
-    const number = this.offset(HP_NUMBER_OFFSET);
-    const padding = this.images.scale === 1 ? 0 : 1;
+    return this.position ? this.captureAreaAt(this.position, this.images) : null;
+  }
+
+  private captureAreaAt(position: PointLike, images: ScaledImages): RectLike {
+    const left = this.offset(LEFT_EDGE_OFFSET, images.scale);
+    const number = this.offset(HP_NUMBER_OFFSET, images.scale);
+    const padding = images.scale === 1 ? 0 : 1;
     return {
-      x: this.position.x + left.x - padding,
-      y: this.position.y - padding,
+      x: position.x + left.x - padding,
+      y: position.y - padding,
       width:
         Math.max(
-          this.images.voragoName.width,
-          number.x + this.images.noHpNumber.width,
-          left.x + this.images.zeroHp.width,
+          images.voragoName.width,
+          number.x + images.noHpNumber.width,
+          left.x + images.zeroHp.width,
         ) -
         left.x +
         padding * 2,
       height:
         Math.max(
-          this.images.voragoName.height,
-          number.y + this.images.noHpNumber.height,
-          left.y + this.images.zeroHp.height,
+          images.voragoName.height,
+          number.y + images.noHpNumber.height,
+          left.y + images.zeroHp.height,
         ) +
         padding * 2,
     };
@@ -211,11 +231,21 @@ export class EmptyHpDetector {
 
   startPolling(
     capture: (area: RectLike | null) => ImgRef | null,
-    onEmpty: () => void,
+    onEmpty: (capturedAt: number) => void,
     minimumInterval: () => number = () => 0,
+    onRead: (error: unknown | null) => void = () => {},
   ): void {
     let scan: Generator<void, boolean> | null = null;
     let minimum = 0;
+    let capturedAt = 0;
+    let captureAvailable = false;
+    const takeSnapshot = (area: RectLike | null) => {
+      const startedAt = performance.now();
+      const image = capture(area);
+      captureAvailable = image !== null;
+      if (image) capturedAt = startedAt;
+      return image;
+    };
     const poll = () => {
       let interval = SEARCH_INTERVAL;
       try {
@@ -229,15 +259,10 @@ export class EmptyHpDetector {
             interval = Math.max(SEARCH_INTERVAL, this.nextSearch - performance.now());
             return;
           }
-          const image = capture(area);
+          const image = takeSnapshot(area);
           if (!image) return;
-          const cropped =
-            area &&
-            image.x === area.x &&
-            image.y === area.y &&
-            image.width === area.width &&
-            image.height === area.height;
-          scan = this.detectSteps(image, cropped ? () => capture(null) : undefined, search);
+          const cropped = area && isExactCapture(image, area);
+          scan = this.detectSteps(image, cropped ? takeSnapshot : undefined, search);
         }
 
         const step = scan.next();
@@ -247,9 +272,11 @@ export class EmptyHpDetector {
         else if (!this.position) {
           interval = Math.max(SEARCH_INTERVAL, this.nextSearch - performance.now());
         }
-        if (step.value) onEmpty();
+        if (captureAvailable) onRead(null);
+        if (step.value) onEmpty(capturedAt);
       } catch (error) {
         scan = null;
+        onRead(error);
         throw error;
       } finally {
         // Alt1 has one bound image per app: never recapture between search slices.
@@ -269,35 +296,64 @@ export class EmptyHpDetector {
 
   private *detectSteps(
     image: ImgRef,
-    captureFull?: () => ImgRef | null,
+    capture?: (area: RectLike | null) => ImgRef | null,
     search = true,
   ): Generator<void, boolean> {
     this.tracking = this.position !== null && this.matchesName(image, this.position);
     if (!this.tracking) {
       // Neither a crop miss nor a deferred search proves that the bar disappeared.
       if (!search) return false;
-      if (captureFull) {
-        const full = captureFull();
-        if (!full) return false;
-        image = full;
-      }
-      const found = image.findSubimage(this.templates[0].voragoName)[0];
-      if (found) {
-        this.images = this.templates[0];
-        this.position = { x: found.x + image.x, y: found.y + image.y };
-      } else {
-        const match = yield* this.findScaledName(image);
-        if (!match) {
-          const area = this.captureArea;
-          if (area && !image.containsArea(area)) this.position = null;
-          this.wasEmpty = false;
-          this.nextSearch = performance.now() + this.searchBackoff;
-          this.searchBackoff = Math.min(this.searchBackoff * 2, MAX_SEARCH_BACKOFF);
-          return false;
+      let match: NameMatch | null;
+      if (capture) {
+        const area = this.captureArea;
+        const x = area ? Math.max(0, area.x - NEARBY_SEARCH_RADIUS) : 0;
+        const y = area ? Math.max(0, area.y - NEARBY_SEARCH_RADIUS) : 0;
+        const nearbyArea = area
+          ? {
+              x,
+              y,
+              width: area.x + area.width + NEARBY_SEARCH_RADIUS - x,
+              height: area.y + area.height + NEARBY_SEARCH_RADIUS - y,
+            }
+          : null;
+        const nearby = capture(nearbyArea);
+        if (!nearby) return false;
+        image = nearby;
+        match = this.findNearbyName(image);
+        if (
+          nearbyArea &&
+          isExactCapture(image, nearbyArea) &&
+          (!match || !image.containsArea(this.captureAreaAt(match.position, match.images)))
+        ) {
+          // A local name match is not enough if a scale change clipped the HP regions.
+          const full = capture(null);
+          if (!full) return false;
+          image = full;
+          match = null;
         }
-        this.images = match.images;
-        this.position = match.position;
+      } else {
+        match = this.findNearbyName(image);
       }
+      if (!match) {
+        const found = image.findSubimage(this.templates[0].voragoName)[0];
+        match = found
+          ? {
+              images: this.templates[0],
+              position: { x: found.x + image.x, y: found.y + image.y },
+              score: 0,
+            }
+          : yield* this.findScaledName(image);
+      }
+      if (!match) {
+        const area = this.captureArea;
+        if (area && !image.containsArea(area)) this.position = null;
+        this.wasEmpty = false;
+        this.nextSearch = performance.now() + this.searchBackoff;
+        this.searchBackoff = Math.min(this.searchBackoff * 2, MAX_SEARCH_BACKOFF);
+        return false;
+      }
+      this.images = match.images;
+      this.position = match.position;
       this.tracking = true;
     }
     this.searchBackoff = INITIAL_SEARCH_BACKOFF;
@@ -344,6 +400,35 @@ export class EmptyHpDetector {
     );
   }
 
+  private findNearbyName(image: ImgRef): NameMatch | null {
+    if (!this.position) return null;
+    const x = this.position.x - image.x;
+    const y = this.position.y - image.y;
+    const left = Math.max(0, x - NEARBY_SEARCH_RADIUS);
+    const top = Math.max(0, y - NEARBY_SEARCH_RADIUS);
+    const width = Math.max(...this.templates.map((entry) => entry.voragoName.width));
+    const height = Math.max(...this.templates.map((entry) => entry.voragoName.height));
+    const right = Math.min(image.width, x + width + NEARBY_SEARCH_RADIUS);
+    const bottom = Math.min(image.height, y + height + NEARBY_SEARCH_RADIUS);
+    if (right <= left || bottom <= top) return null;
+    const pixels = image.read(left, top, right - left, bottom - top);
+    const found = new ImgRefData(pixels).findSubimage(this.templates[0].voragoName)[0];
+    if (found) {
+      return {
+        images: this.templates[0],
+        position: { x: found.x + image.x + left, y: found.y + image.y + top },
+        score: 0,
+      };
+    }
+    // Prefer the cached scale, but compare others so a scale change is not
+    // mistaken for a shifted match at the old scale.
+    const candidates = [
+      ...this.templates.filter((entry) => entry.scale !== 1 && entry.scale === this.images.scale),
+      ...this.templates.filter((entry) => entry.scale !== 1 && entry.scale !== this.images.scale),
+    ];
+    return this.findScaledNameInTile(pixels, image.x + left, image.y + top, null, candidates);
+  }
+
   private *findScaledName(image: ImgRef): Generator<void, NameMatch | null> {
     // Keep each native transfer and candidate list bounded, even on 4K displays.
     // Overlap by the largest name so a tile boundary cannot cut a match in half.
@@ -372,6 +457,7 @@ export class EmptyHpDetector {
     originX: number,
     originY: number,
     best: NameMatch | null,
+    candidates = this.templates.slice(1),
   ): NameMatch | null {
     // Native matching rejects individual antialiased pixels. Shortlist gold-on-dark
     // text, then compare the complete name at each scale in this small tile.
@@ -413,7 +499,7 @@ export class EmptyHpDetector {
         }
       }
     }
-    for (const candidate of this.templates.slice(1)) {
+    for (const candidate of candidates) {
       const needle = candidate.voragoName;
       for (const point of bright) {
         const x = point.x - candidate.anchor.x;

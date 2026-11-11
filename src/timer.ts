@@ -46,14 +46,14 @@ export function activeSection(remaining: number): Section {
   return SECTIONS[0];
 }
 
-// Snap the raw remaining seconds to the step of whichever section is active.
+// Round up so the countdown never announces a window boundary before it arrives.
 export function snapRemainingSeconds(rawSecs: number): number {
   const secs = Math.max(0, rawSecs);
   const step = secs <= 0 ? SECTIONS[0].step : activeSection(secs).step;
-  return Math.floor(secs / step + 1e-9) * step;
+  return Math.max(0, Math.ceil(secs / step - 1e-9) * step);
 }
 
-// Given the snapped remaining seconds, return the fill percentage for each
+// Given the actual remaining seconds, return the fill percentage for each
 // section in left-to-right order.
 export function sectionPercentages(secsNum: number): number[] {
   const elapsed = TOTAL_TIME - secsNum;
