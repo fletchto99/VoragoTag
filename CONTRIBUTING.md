@@ -1,6 +1,6 @@
 # Contributing
 
-Use Node.js 22 or newer (`.nvmrc` specifies the development version).
+Use Node.js 24 or newer (`.nvmrc` specifies the development version).
 
 ```sh
 npm ci
@@ -14,15 +14,15 @@ npm run format
 
 Open `dist/index.html` to try the browser demo. Pushes to `main` deploy to GitHub Pages.
 
-CI installs the latest npm 11 release before installing dependencies and running
-`npm audit signatures`. Node 22's bundled npm 10 can incorrectly reject keyless
-attestations with `EMISSINGSIGNATUREKEY`; npm 11 includes the
+CI and deployment use the latest Node 24 release selected by `.nvmrc`, including
+its bundled npm. Node 22's bundled npm 10 can incorrectly reject keyless
+attestations with `EMISSINGSIGNATUREKEY`; current Node 24 releases include the
 [upstream fix](https://github.com/npm/pacote/pull/454). Signature and provenance
-verification remain required. To use the same verifier locally, run
-`npx --yes npm@11 audit signatures` after `npm ci`.
+verification remain required in CI. With an up-to-date Node 24 installation, run
+`npm audit signatures` after `npm ci` to verify locally.
 
-Dependabot updates project dependencies and GitHub Actions weekly. The CI npm
-version follows 11.x automatically rather than relying on Dependabot.
+Dependabot updates project dependencies and GitHub Actions weekly. CI gets Node
+and npm updates together through `.nvmrc`, without a separate npm install.
 TypeScript stays on 6.0.x until typescript-eslint supports 6.1 or newer.
 The `minimatch@10` override uses patched 11.x releases to address
 [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249).

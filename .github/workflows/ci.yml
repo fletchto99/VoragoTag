@@ -22,10 +22,6 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - name: Setup npm
-        # Follow npm 11 updates; Node 22's bundled npm 10 rejects keyless attestations.
-        run: npm install --global npm@11
-
       - name: Install dependencies
         run: npm ci
 
@@ -46,10 +42,6 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-
-      - name: Setup npm
-        # Follow npm 11 updates; Node 22's bundled npm 10 rejects keyless attestations.
-        run: npm install --global npm@11
 
       - name: Install dependencies
         run: npm ci
