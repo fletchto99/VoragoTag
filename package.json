@@ -1,6 +1,6 @@
 {
   "name": "voragotag",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "An Alt1 overlay that times the target-cycle ult for the Vorago GM rotation.",
   "private": true,
   "license": "MIT",
