@@ -48,6 +48,10 @@ Custom scales or differently rendered game interfaces may still need additional
 reference images. If detection fails, keep an original-resolution Alt1 capture
 of the populated and empty HP bar, along with your Windows and RuneScape scaling settings.
 
+When the bar is missing, full-window searches pause for up to four seconds between
+scans to reduce capture load. The last known position is still checked frequently;
+reacquiring a moved bar can take a few seconds. Normal fast tracking resumes once found.
+
 Automatic detection cannot fix a blank or incorrectly scaled capture from Alt1 itself.
 Check the preview in Alt1's Capture settings and follow
 [Alt1's capture troubleshooting guide](https://runeapps.org/help_alt1_capture).

@@ -12,7 +12,9 @@ const HP_NUMBER_OFFSET = { x: 0, y: 22 };
 
 const TRACKED_INTERVAL = 25;
 const SEARCH_INTERVAL = 100;
-const SCALED_SEARCH_INTERVAL = 1000;
+const INITIAL_SEARCH_BACKOFF = 1000;
+const MAX_SEARCH_BACKOFF = 4000;
+const SEARCH_SLICE_INTERVAL = 16;
 const SEARCH_TILE_WIDTH = 1024;
 const SEARCH_TILE_HEIGHT = 256;
 // Mean summed RGB error tolerates resampling without making every text edge optional.
@@ -27,6 +29,12 @@ interface ScaledImages extends DetectionImages {
   samples: PointLike[];
   anchor: PointLike;
   dark: PointLike;
+}
+
+interface NameMatch {
+  position: PointLike;
+  images: ScaledImages;
+  score: number;
 }
 
 function nameSignature(image: ImageData) {
@@ -146,8 +154,10 @@ function resizeTemplate(image: ImageData, scale: number, smooth: boolean): Image
 
 export class EmptyHpDetector {
   private position: PointLike | null = null;
+  private tracking = false;
   private wasEmpty = false;
-  private nextScaledSearch = 0;
+  private nextSearch = 0;
+  private searchBackoff = INITIAL_SEARCH_BACKOFF;
   private readonly templates: ScaledImages[];
   private images: ScaledImages;
 
@@ -204,64 +214,94 @@ export class EmptyHpDetector {
     onEmpty: () => void,
     minimumInterval: () => number = () => 0,
   ): void {
+    let scan: Generator<void, boolean> | null = null;
+    let minimum = 0;
     const poll = () => {
       let interval = SEARCH_INTERVAL;
-      let minimum = 0;
       try {
-        const hint = minimumInterval();
-        if (Number.isFinite(hint) && hint > 0 && hint <= 2147483647) minimum = hint;
-        const area = this.captureArea;
-        const image = capture(area);
-        let captured = image !== null;
-        const cropped =
-          image &&
-          area &&
-          image.x === area.x &&
-          image.y === area.y &&
-          image.width === area.width &&
-          image.height === area.height;
-        const captureFull = cropped
-          ? () => {
-              const full = capture(null);
-              captured = full !== null;
-              return full;
-            }
-          : undefined;
-        if (image && this.detect(image, captureFull, performance.now() >= this.nextScaledSearch)) {
-          onEmpty();
+        if (!scan) {
+          minimum = 0;
+          const hint = minimumInterval();
+          if (Number.isFinite(hint) && hint > 0 && hint <= 2147483647) minimum = hint;
+          const search = performance.now() >= this.nextSearch;
+          const area = this.captureArea;
+          if (!area && !search) {
+            interval = Math.max(SEARCH_INTERVAL, this.nextSearch - performance.now());
+            return;
+          }
+          const image = capture(area);
+          if (!image) return;
+          const cropped =
+            area &&
+            image.x === area.x &&
+            image.y === area.y &&
+            image.width === area.width &&
+            image.height === area.height;
+          scan = this.detectSteps(image, cropped ? () => capture(null) : undefined, search);
         }
-        if (captured && this.position) {
-          interval = TRACKED_INTERVAL;
+
+        const step = scan.next();
+        if (!step.done) return;
+        scan = null;
+        if (this.tracking) interval = TRACKED_INTERVAL;
+        else if (!this.position) {
+          interval = Math.max(SEARCH_INTERVAL, this.nextSearch - performance.now());
         }
+        if (step.value) onEmpty();
+      } catch (error) {
+        scan = null;
+        throw error;
       } finally {
-        // Keep retrying after errors without swallowing them or queuing slow scans.
-        setTimeout(poll, Math.max(interval, minimum));
+        // Alt1 has one bound image per app: never recapture between search slices.
+        // Yield without swallowing errors or starting overlapping scans.
+        setTimeout(poll, scan ? SEARCH_SLICE_INTERVAL : Math.max(interval, minimum));
       }
     };
     poll();
   }
 
-  detect(image: ImgRef, captureFull?: () => ImgRef | null, searchScaled = true): boolean {
-    if (!this.position || !this.matchesName(image, this.position)) {
-      // Do not observe a missing bar until the full-window fallback has succeeded.
+  detect(image: ImgRef, captureFull?: () => ImgRef | null): boolean {
+    const scan = this.detectSteps(image, captureFull);
+    let step = scan.next();
+    while (!step.done) step = scan.next();
+    return step.value;
+  }
+
+  private *detectSteps(
+    image: ImgRef,
+    captureFull?: () => ImgRef | null,
+    search = true,
+  ): Generator<void, boolean> {
+    this.tracking = this.position !== null && this.matchesName(image, this.position);
+    if (!this.tracking) {
+      // Neither a crop miss nor a deferred search proves that the bar disappeared.
+      if (!search) return false;
       if (captureFull) {
         const full = captureFull();
         if (!full) return false;
         image = full;
       }
-      this.position = null;
       const found = image.findSubimage(this.templates[0].voragoName)[0];
       if (found) {
         this.images = this.templates[0];
         this.position = { x: found.x + image.x, y: found.y + image.y };
-      } else if (searchScaled) {
-        this.nextScaledSearch = performance.now() + SCALED_SEARCH_INTERVAL;
-        this.findScaledName(image);
       } else {
-        // A deferred scale search is not evidence that the bar disappeared.
-        return false;
+        const match = yield* this.findScaledName(image);
+        if (!match) {
+          const area = this.captureArea;
+          if (area && !image.containsArea(area)) this.position = null;
+          this.wasEmpty = false;
+          this.nextSearch = performance.now() + this.searchBackoff;
+          this.searchBackoff = Math.min(this.searchBackoff * 2, MAX_SEARCH_BACKOFF);
+          return false;
+        }
+        this.images = match.images;
+        this.position = match.position;
       }
+      this.tracking = true;
     }
+    this.searchBackoff = INITIAL_SEARCH_BACKOFF;
+    this.nextSearch = 0;
 
     const left = this.offset(LEFT_EDGE_OFFSET);
     const number = this.offset(HP_NUMBER_OFFSET);
@@ -304,31 +344,35 @@ export class EmptyHpDetector {
     );
   }
 
-  private findScaledName(image: ImgRef): void {
+  private *findScaledName(image: ImgRef): Generator<void, NameMatch | null> {
     // Keep each native transfer and candidate list bounded, even on 4K displays.
     // Overlap by the largest name so a tile boundary cannot cut a match in half.
     const overlapX = Math.max(...this.templates.map((entry) => entry.voragoName.width)) - 1;
     const overlapY = Math.max(...this.templates.map((entry) => entry.voragoName.height)) - 1;
-    let bestScore = MAX_NAME_ERROR;
+    let best: NameMatch | null = null;
     for (let y = 0; y < image.height; y += SEARCH_TILE_HEIGHT - overlapY) {
       for (let x = 0; x < image.width; x += SEARCH_TILE_WIDTH - overlapX) {
+        if (x !== 0 || y !== 0) yield;
         const pixels = image.read(
           x,
           y,
           Math.min(SEARCH_TILE_WIDTH, image.width - x),
           Math.min(SEARCH_TILE_HEIGHT, image.height - y),
         );
-        bestScore = this.findScaledNameInTile(pixels, image.x + x, image.y + y, bestScore);
+        best = this.findScaledNameInTile(pixels, image.x + x, image.y + y, best);
+        if (x + pixels.width === image.width) break;
       }
+      if (y + SEARCH_TILE_HEIGHT >= image.height) break;
     }
+    return best;
   }
 
   private findScaledNameInTile(
     pixels: ImageData,
     originX: number,
     originY: number,
-    bestScore: number,
-  ): number {
+    best: NameMatch | null,
+  ): NameMatch | null {
     // Native matching rejects individual antialiased pixels. Shortlist gold-on-dark
     // text, then compare the complete name at each scale in this small tile.
     const bright: PointLike[] = [];
@@ -400,14 +444,16 @@ export class EmptyHpDetector {
         }
         if (error > candidate.samples.length * MAX_SAMPLE_ERROR) continue;
         const score = nameScore(pixels, needle, x, y);
-        if (score < bestScore) {
-          bestScore = score;
-          this.images = candidate;
-          this.position = { x: x + originX, y: y + originY };
+        if (score < (best?.score ?? MAX_NAME_ERROR)) {
+          best = {
+            score,
+            images: candidate,
+            position: { x: x + originX, y: y + originY },
+          };
         }
       }
     }
-    return bestScore;
+    return best;
   }
 
   private matchesAt(
@@ -420,29 +466,36 @@ export class EmptyHpDetector {
   ): boolean {
     x -= image.x;
     y -= image.y;
+    const regionX = Math.max(0, x - radius);
+    const regionY = Math.max(0, y - radius);
+    const width = Math.min(image.width, x + template.width + radius) - regionX;
+    const height = Math.min(image.height, y + template.height + radius) - regionY;
+    if (width < template.width || height < template.height) return false;
+    const region = image.read(regionX, regionY, width, height);
     for (let dy = -radius; dy <= radius; dy++) {
       for (let dx = -radius; dx <= radius; dx++) {
-        const left = x + dx;
-        const top = y + dy;
+        const left = x + dx - regionX;
+        const top = y + dy - regionY;
         if (
           left < 0 ||
           top < 0 ||
-          left + template.width > image.width ||
-          top + template.height > image.height
+          left + template.width > region.width ||
+          top + template.height > region.height
         ) {
           continue;
         }
-        const region = image.read(left, top, template.width, template.height);
-        if (!Number.isFinite(simpleCompare(region, template, 0, 0, rejectFill ? 40 : 30))) continue;
+        if (!Number.isFinite(simpleCompare(region, template, left, top, rejectFill ? 40 : 30))) {
+          continue;
+        }
         let filled = false;
         if (rejectFill) {
           for (
             let row = Math.ceil(2 * this.images.scale);
-            row < region.height - Math.ceil(2 * this.images.scale);
+            row < template.height - Math.ceil(2 * this.images.scale);
             row++
           ) {
-            for (let col = Math.floor(20 * this.images.scale) - 1; col < region.width; col++) {
-              const i = (row * region.width + col) * 4;
+            for (let col = Math.floor(20 * this.images.scale) - 1; col < template.width; col++) {
+              const i = ((top + row) * region.width + left + col) * 4;
               if (
                 region.data[i + 1] > region.data[i] + 15 &&
                 region.data[i + 1] > region.data[i + 2] + 15

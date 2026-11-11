@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { ImageData, ImgRefData, type RectLike } from "alt1";
@@ -23,6 +23,12 @@ const fixtures = Promise.all([
   loadImage("test", "fixtures", "hp-empty.png"),
   loadImage("test", "fixtures", "hp-populated.png"),
 ]);
+
+function pollingClock(t: TestContext) {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  t.mock.method(performance, "now", () => Date.now());
+  return (milliseconds: number) => t.mock.timers.tick(milliseconds);
+}
 
 function copy(image: ImageData): ImageData {
   return new ImageData(new Uint8ClampedArray(image.data), image.width, image.height);
@@ -127,7 +133,8 @@ test("scaled tracking uses cropped game coordinates and survives fractional alig
         assert.equal(detector.detect(cropped), false);
         assert.equal(cropped.searches, 0);
         assert.deepEqual(detector.captureArea, area);
-        assert.ok(cropped.reads.every((read) => read.width <= Math.ceil(80 * scale)));
+        assert.ok(cropped.reads.every((read) => read.width <= Math.ceil(80 * scale) + 2));
+        assert.equal(cropped.reads.length, 3);
       });
     }
   }
@@ -188,6 +195,24 @@ class NativeLikeImage extends TrackedImage {
   }
 }
 
+test("scaled populated tracking reads each comparison neighborhood only once", async () => {
+  const [templates, , populated] = await fixtures;
+  for (const scale of [0.75, 1.25, 1.5, 2, 3]) {
+    const detector = new EmptyHpDetector(templates);
+    const frame = new NativeLikeImage(await resize(populated, scale, "cubic"));
+    assert.equal(detector.detect(frame), false);
+    const area = detector.captureArea!;
+    const crop = new NativeLikeImage(
+      frame.read(area.x, area.y, area.width, area.height),
+      area.x,
+      area.y,
+    );
+    assert.equal(detector.detect(crop), false);
+    assert.equal(crop.searches, 0);
+    assert.equal(crop.reads.length, 2);
+  }
+});
+
 test("scaled searches bound native transfers on 4K frames, including tile seams and edges", async () => {
   const [templates, empty] = await fixtures;
   const scaled = await resize(empty, 3, "cubic");
@@ -210,74 +235,179 @@ test("scaled searches bound native transfers on 4K frames, including tile seams 
     assert.equal(detector.detect(cropped), false);
     assert.equal(cropped.searches, 0);
   }
+  const lastArea = detector.captureArea;
   assert.equal(detector.detect(new NativeLikeImage(new ImageData(3840, 2160))), false);
-  assert.equal(detector.captureArea, null);
+  assert.deepEqual(detector.captureArea, lastArea, "keep a hint for cheap reacquisition");
 });
 
-test("polling rate-limits scaled fallback after the bar disappears without slowing native search", async (t) => {
+test("missing bars back off broad searches to 1, 2, then 4 seconds while checking the last location", async (t) => {
   const [templates, empty] = await fixtures;
   const detector = new EmptyHpDetector(templates);
-  const depleted = new NativeLikeImage(empty);
-  const missing = new NativeLikeImage(new ImageData(900, 300));
+  const depleted = new ImgRefData(place(empty, 0, 0, 600, 200));
+  const missing = new ImgRefData(new ImageData(600, 200));
   let frame = depleted;
-  let now = 0;
-  t.mock.method(performance, "now", () => now);
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const tick = pollingClock(t);
+  const requests: (RectLike | null)[] = [];
+  const capture = (area: RectLike | null) => {
+    requests.push(area);
+    return area
+      ? new NativeLikeImage(frame.read(area.x, area.y, area.width, area.height), area.x, area.y)
+      : new NativeLikeImage(frame.buf);
+  };
+  const fullCaptures = () => requests.filter((area) => area === null).length;
   const onEmpty = t.mock.fn();
-  detector.startPolling(() => frame, onEmpty);
+  detector.startPolling(capture, onEmpty);
   assert.equal(onEmpty.mock.callCount(), 1);
+  const lastArea = detector.captureArea;
 
   frame = missing;
-  now += 25;
-  t.mock.timers.tick(25);
-  assert.ok(missing.reads.length > 0);
-  const reads = missing.reads.length;
-  for (let i = 0; i < 9; i++) {
-    now += 100;
-    t.mock.timers.tick(100);
-    assert.equal(missing.reads.length, reads);
+  tick(25);
+  assert.equal(fullCaptures(), 2);
+  for (const delay of [1000, 2000, 4000, 4000]) {
+    const fullCount = fullCaptures();
+    const count = requests.length;
+    for (let elapsed = 100; elapsed < delay; elapsed += 100) {
+      tick(100);
+      assert.equal(fullCaptures(), fullCount);
+      assert.deepEqual(requests.at(-1), lastArea);
+    }
+    assert.equal(requests.length, count + delay / 100 - 1);
+    tick(100);
+    assert.equal(fullCaptures(), fullCount + 1);
   }
-  assert.equal(missing.searches, 10);
-  now += 100;
-  t.mock.timers.tick(100);
-  assert.ok(missing.reads.length > reads);
 
   frame = depleted;
-  now += 100;
-  t.mock.timers.tick(100);
-  assert.equal(onEmpty.mock.callCount(), 2, "native reacquisition does not wait for scaled search");
+  const fullCount = fullCaptures();
+  tick(100);
+  assert.equal(onEmpty.mock.callCount(), 2, "a returning bar is detected during backoff");
+  assert.equal(fullCaptures(), fullCount);
+  const count = requests.length;
+  tick(25);
+  assert.equal(requests.length, count + 1, "fast tracking resumes");
+
+  frame = missing;
+  tick(25);
+  assert.equal(fullCaptures(), fullCount + 1, "a new loss is searched immediately");
+  for (let i = 0; i < 9; i++) tick(100);
+  assert.equal(fullCaptures(), fullCount + 1);
+  tick(100);
+  assert.equal(fullCaptures(), fullCount + 2, "successful tracking resets the backoff");
 });
 
-test("deferring scaled reacquisition preserves the empty edge and resumes scaled tracking", async (t) => {
+test("incremental scaled reacquisition preserves the empty edge and resumes scaled tracking", async (t) => {
   const [templates, empty, populated] = await fixtures;
   const detector = new EmptyHpDetector(templates);
   const depleted = await resize(empty, 1.5, "cubic");
   let frame = new NativeLikeImage(depleted);
-  let now = 0;
-  t.mock.method(performance, "now", () => now);
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const tick = pollingClock(t);
   const onEmpty = t.mock.fn();
   detector.startPolling(() => frame, onEmpty);
   assert.equal(onEmpty.mock.callCount(), 1);
 
-  frame = new NativeLikeImage(place(depleted, 270, 130));
-  now = 25;
-  t.mock.timers.tick(25);
-  assert.equal(frame.reads.length, 1, "only the old name position is read during cooldown");
+  frame = new NativeLikeImage(place(depleted, 50, 10));
+  tick(25);
+  assert.equal(frame.reads.length, 2, "read the old name position and only the first tile");
   assert.equal(onEmpty.mock.callCount(), 1);
-  now = 1025;
-  t.mock.timers.tick(100);
+  tick(16);
   assert.ok(detector.captureArea);
   assert.equal(onEmpty.mock.callCount(), 1, "a moved empty bar must not retrigger");
 
   frame = new NativeLikeImage(await resize(populated, 1.5, "cubic"));
-  now = 2025;
-  t.mock.timers.tick(25);
+  tick(25);
   assert.ok(detector.captureArea);
   frame = new NativeLikeImage(depleted);
-  now = 3025;
-  t.mock.timers.tick(25);
+  tick(25);
   assert.equal(onEmpty.mock.callCount(), 2, "a new empty edge still triggers");
+});
+
+test("4K polling yields between tiles and never replaces an in-flight native snapshot", async (t) => {
+  const [templates, empty] = await fixtures;
+  const scaled = await resize(empty, 3, "cubic");
+  const frame = new ImgRefData(place(scaled, 2200, 1700, 3840, 2160));
+  const tick = pollingClock(t);
+  let generation = 0;
+  class Snapshot extends NativeLikeImage {
+    private readonly generation = generation;
+
+    override read(x = 0, y = 0, width = this.width, height = this.height) {
+      assert.equal(this.generation, generation, "a new native capture invalidated this snapshot");
+      return super.read(x, y, width, height);
+    }
+  }
+  const snapshots: Snapshot[] = [];
+  const capture = (area: RectLike | null) => {
+    generation++;
+    const image = area
+      ? new Snapshot(frame.read(area.x, area.y, area.width, area.height), area.x, area.y)
+      : new Snapshot(frame.buf);
+    snapshots.push(image);
+    return image;
+  };
+  const onEmpty = t.mock.fn();
+  const detector = new EmptyHpDetector(templates);
+  detector.startPolling(capture, onEmpty, () => 40);
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].reads.length, 1);
+  assert.equal(onEmpty.mock.callCount(), 0);
+  const heartbeat = t.mock.fn();
+  setTimeout(heartbeat, 8);
+  tick(8);
+  assert.equal(heartbeat.mock.callCount(), 1);
+  assert.equal(snapshots[0].reads.length, 1);
+  tick(8);
+  for (let slice = 0; slice < 60 && onEmpty.mock.callCount() === 0; slice++) {
+    const reads = snapshots[0].reads.filter((area) => area.width > 300).length;
+    tick(16);
+    assert.equal(snapshots.length, 1);
+    assert.equal(snapshots[0].reads.filter((area) => area.width > 300).length, reads + 1);
+  }
+  assert.equal(onEmpty.mock.callCount(), 1);
+  assert.ok(detector.captureArea);
+  tick(39);
+  assert.equal(snapshots.length, 1);
+  tick(1);
+  assert.equal(snapshots.length, 2);
+  assert.equal(snapshots[1].searches, 0);
+  assert.equal(snapshots[1].reads.length, 3);
+  assert.equal(onEmpty.mock.callCount(), 1);
+});
+
+test("a failed search slice remains visible and retries without committing a partial match", async (t) => {
+  const [templates, empty] = await fixtures;
+  const scaled = await resize(empty, 1.5, "cubic");
+  const detector = new EmptyHpDetector(templates);
+  assert.equal(detector.detect(new ImgRefData(scaled)), true);
+  const lastArea = detector.captureArea;
+  pollingClock(t);
+  const schedule = t.mock.method(globalThis, "setTimeout");
+  const runNext = () => {
+    const callback = schedule.mock.calls.at(-1)!.arguments[0];
+    assert.ok(typeof callback === "function");
+    callback();
+  };
+  const error = new Error("native tile transfer failed");
+  const frame = new NativeLikeImage(place(scaled, 50, 10));
+  const read = frame.read.bind(frame);
+  let failed = true;
+  t.mock.method(frame, "read", (x = 0, y = 0, width = frame.width, height = frame.height) => {
+    if (failed && y > 0 && width > 240) throw error;
+    return read(x, y, width, height);
+  });
+  const capture = t.mock.fn(() => frame);
+  const onEmpty = t.mock.fn();
+  detector.startPolling(capture, onEmpty);
+  assert.deepEqual(detector.captureArea, lastArea);
+  assert.equal(schedule.mock.calls.at(-1)!.arguments[1], 16);
+  assert.throws(runNext, error);
+  assert.equal(schedule.mock.calls.at(-1)!.arguments[1], 100);
+  assert.deepEqual(detector.captureArea, lastArea);
+  assert.equal(onEmpty.mock.callCount(), 0);
+  failed = false;
+  runNext();
+  runNext();
+  assert.equal(capture.mock.callCount(), 2);
+  assert.notDeepEqual(detector.captureArea, lastArea);
+  assert.equal(onEmpty.mock.callCount(), 0);
 });
 
 function fill(
@@ -514,34 +644,34 @@ test("polling checks a tracked bar every 25ms and keeps observing after a trigge
   assert.equal(onEmpty.mock.callCount(), 2);
 });
 
-test("polling captures and searches only every 100ms until the bar is located", async (t) => {
+test("polling backs off captures until first acquisition, then resumes fast tracking", async (t) => {
   const [templates, empty] = await fixtures;
-  const missing = new TrackedImage(new ImageData(900, 300));
+  const missing = new TrackedImage(new ImageData(600, 200));
   let frame = missing;
   const capture = t.mock.fn(() => frame);
   const onEmpty = t.mock.fn();
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const tick = pollingClock(t);
 
   new EmptyHpDetector(templates).startPolling(capture, onEmpty);
   assert.equal(capture.mock.callCount(), 1);
   assert.equal(missing.searches, 1);
-  t.mock.timers.tick(99);
+  tick(999);
   assert.equal(capture.mock.callCount(), 1);
-  t.mock.timers.tick(1);
+  tick(1);
   assert.equal(capture.mock.callCount(), 2);
   assert.equal(missing.searches, 2);
   assert.equal(onEmpty.mock.callCount(), 0);
 
   frame = new TrackedImage(empty);
-  t.mock.timers.tick(99);
+  tick(1999);
   assert.equal(capture.mock.callCount(), 2);
-  t.mock.timers.tick(1);
+  tick(1);
   assert.equal(capture.mock.callCount(), 3);
   assert.equal(frame.searches, 1);
   assert.equal(onEmpty.mock.callCount(), 1);
-  t.mock.timers.tick(24);
+  tick(24);
   assert.equal(capture.mock.callCount(), 3);
-  t.mock.timers.tick(1);
+  tick(1);
   assert.equal(capture.mock.callCount(), 4);
   assert.equal(frame.searches, 1);
   assert.equal(onEmpty.mock.callCount(), 1);
@@ -566,7 +696,7 @@ test("polling immediately searches a moved bar and slows down only when it is mi
   assert.equal(capture.mock.callCount(), 3);
   assert.equal(frame.searches, 1);
 
-  frame = new TrackedImage(new ImageData(900, 300));
+  frame = new TrackedImage(new ImageData(600, 200));
   t.mock.timers.tick(25);
   assert.equal(capture.mock.callCount(), 4);
   assert.equal(frame.searches, 1);
@@ -574,7 +704,7 @@ test("polling immediately searches a moved bar and slows down only when it is mi
   assert.equal(capture.mock.callCount(), 4);
   t.mock.timers.tick(1);
   assert.equal(capture.mock.callCount(), 5);
-  assert.equal(frame.searches, 2);
+  assert.equal(frame.searches, 1, "check the cached position without another broad search");
 });
 
 test("unavailable captures back off without rearming a continuously empty bar", async (t) => {
@@ -685,7 +815,7 @@ test("regional polling reacquires a moved empty bar without treating the crop mi
   assert.deepEqual(requests.at(-1), { x: 287, y: 150, width: 276, height: 44 });
   assert.equal(onEmpty.mock.callCount(), 1);
 
-  frame = new ImgRefData(new ImageData(900, 300));
+  frame = new ImgRefData(new ImageData(600, 200));
   t.mock.timers.tick(25);
   assert.equal(requests.at(-1), null);
   const count = requests.length;
@@ -693,7 +823,7 @@ test("regional polling reacquires a moved empty bar without treating the crop mi
   assert.equal(requests.length, count);
   frame = new ImgRefData(place(empty, 270, 130));
   t.mock.timers.tick(1);
-  assert.equal(requests.at(-1), null);
+  assert.deepEqual(requests.at(-1), { x: 287, y: 150, width: 276, height: 44 });
   assert.equal(onEmpty.mock.callCount(), 2);
 });
 
@@ -742,7 +872,7 @@ test("polling respects a changing Alt1 minimum interval in tracking and search m
   assert.equal(capture.mock.callCount(), 2);
   t.mock.timers.tick(39);
   assert.equal(capture.mock.callCount(), 2);
-  frame = new ImgRefData(new ImageData(900, 300));
+  frame = new ImgRefData(new ImageData(600, 200));
   minimum = 200;
   t.mock.timers.tick(1);
   assert.equal(capture.mock.callCount(), 3);

@@ -46,7 +46,15 @@ tracking, scale changes, and rejection of visible HP fill or numbers.
 These simulated captures do not replace testing real Alt1 captures from
 different Windows DPI and RuneScape interface settings.
 
-Scaled searches transfer overlapping tiles of at most 1 MiB instead of a whole
-game window, and polling runs that fallback at most once per second. Native-size
-searches and cached tracking retain their faster cadence. Native-like test images
-enforce the transfer limit on 4K frames, including tile seams and window edges.
+Scaled searches transfer overlapping tiles of at most 1 MiB. Polling processes one
+tile per turn, yielding for 16 ms between tiles without replacing Alt1's bound
+snapshot. A match is committed only when the search completes.
+
+After an unsuccessful full-window search, retries back off by 1, 2, then 4 seconds.
+The last known bar position is still checked every 100 ms; finding it resets the
+backoff and restores 25 ms tracking. Alt1's capture interval remains a lower bound
+on the normal polling delay. Each tracking comparison reads its whole pixel-offset
+neighborhood once, then checks candidates in memory.
+
+Native-like tests cover 4K transfer limits, tile seams, snapshot lifetime across
+search slices, error recovery, backoff, and two-to-three-read cached tracking.
