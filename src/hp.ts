@@ -12,6 +12,9 @@ const HP_NUMBER_OFFSET = { x: 0, y: 22 };
 
 const TRACKED_INTERVAL = 25;
 const SEARCH_INTERVAL = 100;
+const SCALED_SEARCH_INTERVAL = 1000;
+const SEARCH_TILE_WIDTH = 1024;
+const SEARCH_TILE_HEIGHT = 256;
 // Mean summed RGB error tolerates resampling without making every text edge optional.
 const MAX_NAME_ERROR = 75;
 const MAX_SAMPLE_ERROR = 100;
@@ -144,6 +147,7 @@ function resizeTemplate(image: ImageData, scale: number, smooth: boolean): Image
 export class EmptyHpDetector {
   private position: PointLike | null = null;
   private wasEmpty = false;
+  private nextScaledSearch = 0;
   private readonly templates: ScaledImages[];
   private images: ScaledImages;
 
@@ -223,7 +227,7 @@ export class EmptyHpDetector {
               return full;
             }
           : undefined;
-        if (image && this.detect(image, captureFull)) {
+        if (image && this.detect(image, captureFull, performance.now() >= this.nextScaledSearch)) {
           onEmpty();
         }
         if (captured && this.position) {
@@ -237,7 +241,7 @@ export class EmptyHpDetector {
     poll();
   }
 
-  detect(image: ImgRef, captureFull?: () => ImgRef | null): boolean {
+  detect(image: ImgRef, captureFull?: () => ImgRef | null, searchScaled = true): boolean {
     if (!this.position || !this.matchesName(image, this.position)) {
       // Do not observe a missing bar until the full-window fallback has succeeded.
       if (captureFull) {
@@ -250,8 +254,12 @@ export class EmptyHpDetector {
       if (found) {
         this.images = this.templates[0];
         this.position = { x: found.x + image.x, y: found.y + image.y };
-      } else {
+      } else if (searchScaled) {
+        this.nextScaledSearch = performance.now() + SCALED_SEARCH_INTERVAL;
         this.findScaledName(image);
+      } else {
+        // A deferred scale search is not evidence that the bar disappeared.
+        return false;
       }
     }
 
@@ -297,10 +305,32 @@ export class EmptyHpDetector {
   }
 
   private findScaledName(image: ImgRef): void {
-    // Alt1's native search rejects individual antialiased pixels. Only on a
-    // native-size miss, transfer once and shortlist gold-on-dark text before
-    // comparing the complete name at each scale.
-    const pixels = image.read();
+    // Keep each native transfer and candidate list bounded, even on 4K displays.
+    // Overlap by the largest name so a tile boundary cannot cut a match in half.
+    const overlapX = Math.max(...this.templates.map((entry) => entry.voragoName.width)) - 1;
+    const overlapY = Math.max(...this.templates.map((entry) => entry.voragoName.height)) - 1;
+    let bestScore = MAX_NAME_ERROR;
+    for (let y = 0; y < image.height; y += SEARCH_TILE_HEIGHT - overlapY) {
+      for (let x = 0; x < image.width; x += SEARCH_TILE_WIDTH - overlapX) {
+        const pixels = image.read(
+          x,
+          y,
+          Math.min(SEARCH_TILE_WIDTH, image.width - x),
+          Math.min(SEARCH_TILE_HEIGHT, image.height - y),
+        );
+        bestScore = this.findScaledNameInTile(pixels, image.x + x, image.y + y, bestScore);
+      }
+    }
+  }
+
+  private findScaledNameInTile(
+    pixels: ImageData,
+    originX: number,
+    originY: number,
+    bestScore: number,
+  ): number {
+    // Native matching rejects individual antialiased pixels. Shortlist gold-on-dark
+    // text, then compare the complete name at each scale in this small tile.
     const bright: PointLike[] = [];
     const darkAt = (x: number, y: number) => {
       if (x < 0 || y < 0 || x >= pixels.width || y >= pixels.height) return false;
@@ -339,13 +369,17 @@ export class EmptyHpDetector {
         }
       }
     }
-    let bestScore = MAX_NAME_ERROR;
     for (const candidate of this.templates.slice(1)) {
       const needle = candidate.voragoName;
       for (const point of bright) {
         const x = point.x - candidate.anchor.x;
         const y = point.y - candidate.anchor.y;
-        if (x < 0 || y < 0 || x + needle.width > image.width || y + needle.height > image.height) {
+        if (
+          x < 0 ||
+          y < 0 ||
+          x + needle.width > pixels.width ||
+          y + needle.height > pixels.height
+        ) {
           continue;
         }
         const darkA = (candidate.dark.y * needle.width + candidate.dark.x) * 4;
@@ -369,10 +403,11 @@ export class EmptyHpDetector {
         if (score < bestScore) {
           bestScore = score;
           this.images = candidate;
-          this.position = { x: x + image.x, y: y + image.y };
+          this.position = { x: x + originX, y: y + originY };
         }
       }
     }
+    return bestScore;
   }
 
   private matchesAt(

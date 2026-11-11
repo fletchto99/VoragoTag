@@ -28,8 +28,8 @@ function copy(image: ImageData): ImageData {
   return new ImageData(new Uint8ClampedArray(image.data), image.width, image.height);
 }
 
-function place(image: ImageData, x: number, y: number): ImageData {
-  const frame = new ImageData(Math.max(900, x + image.width), Math.max(300, y + image.height));
+function place(image: ImageData, x: number, y: number, width = 900, height = 300): ImageData {
+  const frame = new ImageData(Math.max(width, x + image.width), Math.max(height, y + image.height));
   for (let row = 0; row < image.height; row++) {
     const pixels = image.data.subarray(row * image.width * 4, (row + 1) * image.width * 4);
     frame.data.set(pixels, ((row + y) * frame.width + x) * 4);
@@ -173,6 +173,112 @@ class TrackedImage extends ImgRefData {
     return super.read(x, y, width, height);
   }
 }
+
+class NativeLikeImage extends TrackedImage {
+  override findSubimage(needle: ImageData) {
+    this.searches++;
+    // Native Alt1 searches do not transfer the full image into JavaScript.
+    return new ImgRefData(this.buf).findSubimage(needle);
+  }
+
+  override read(x = 0, y = 0, width = this.width, height = this.height) {
+    assert.ok(width * height * 4 <= 1024 * 1024, "native pixel transfers must stay within 1 MiB");
+    assert.ok(x >= 0 && y >= 0 && x + width <= this.width && y + height <= this.height);
+    return super.read(x, y, width, height);
+  }
+}
+
+test("scaled searches bound native transfers on 4K frames, including tile seams and edges", async () => {
+  const [templates, empty] = await fixtures;
+  const scaled = await resize(empty, 3, "cubic");
+  const detector = new EmptyHpDetector(templates);
+  for (const [x, y] of [
+    [300, 180],
+    [3840 - scaled.width, 2160 - scaled.height],
+  ]) {
+    const frame = new NativeLikeImage(place(scaled, x, y, 3840, 2160), 100, 50);
+    assert.equal(detector.detect(frame), x === 300);
+    const area = detector.captureArea!;
+    assert.ok(area);
+    assert.ok(Math.abs(area.x - (100 + x + 17 * 3 - 1)) <= 1);
+    assert.ok(Math.abs(area.y - (50 + y + 20 * 3 - 1)) <= 1);
+    const cropped = new NativeLikeImage(
+      frame.read(area.x - frame.x, area.y - frame.y, area.width, area.height),
+      area.x,
+      area.y,
+    );
+    assert.equal(detector.detect(cropped), false);
+    assert.equal(cropped.searches, 0);
+  }
+  assert.equal(detector.detect(new NativeLikeImage(new ImageData(3840, 2160))), false);
+  assert.equal(detector.captureArea, null);
+});
+
+test("polling rate-limits scaled fallback after the bar disappears without slowing native search", async (t) => {
+  const [templates, empty] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  const depleted = new NativeLikeImage(empty);
+  const missing = new NativeLikeImage(new ImageData(900, 300));
+  let frame = depleted;
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const onEmpty = t.mock.fn();
+  detector.startPolling(() => frame, onEmpty);
+  assert.equal(onEmpty.mock.callCount(), 1);
+
+  frame = missing;
+  now += 25;
+  t.mock.timers.tick(25);
+  assert.ok(missing.reads.length > 0);
+  const reads = missing.reads.length;
+  for (let i = 0; i < 9; i++) {
+    now += 100;
+    t.mock.timers.tick(100);
+    assert.equal(missing.reads.length, reads);
+  }
+  assert.equal(missing.searches, 10);
+  now += 100;
+  t.mock.timers.tick(100);
+  assert.ok(missing.reads.length > reads);
+
+  frame = depleted;
+  now += 100;
+  t.mock.timers.tick(100);
+  assert.equal(onEmpty.mock.callCount(), 2, "native reacquisition does not wait for scaled search");
+});
+
+test("deferring scaled reacquisition preserves the empty edge and resumes scaled tracking", async (t) => {
+  const [templates, empty, populated] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  const depleted = await resize(empty, 1.5, "cubic");
+  let frame = new NativeLikeImage(depleted);
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const onEmpty = t.mock.fn();
+  detector.startPolling(() => frame, onEmpty);
+  assert.equal(onEmpty.mock.callCount(), 1);
+
+  frame = new NativeLikeImage(place(depleted, 270, 130));
+  now = 25;
+  t.mock.timers.tick(25);
+  assert.equal(frame.reads.length, 1, "only the old name position is read during cooldown");
+  assert.equal(onEmpty.mock.callCount(), 1);
+  now = 1025;
+  t.mock.timers.tick(100);
+  assert.ok(detector.captureArea);
+  assert.equal(onEmpty.mock.callCount(), 1, "a moved empty bar must not retrigger");
+
+  frame = new NativeLikeImage(await resize(populated, 1.5, "cubic"));
+  now = 2025;
+  t.mock.timers.tick(25);
+  assert.ok(detector.captureArea);
+  frame = new NativeLikeImage(depleted);
+  now = 3025;
+  t.mock.timers.tick(25);
+  assert.equal(onEmpty.mock.callCount(), 2, "a new empty edge still triggers");
+});
 
 function fill(
   image: ImageData,

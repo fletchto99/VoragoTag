@@ -45,3 +45,8 @@ and cubic filters. They cover supported scales, fractional alignment, cropped
 tracking, scale changes, and rejection of visible HP fill or numbers.
 These simulated captures do not replace testing real Alt1 captures from
 different Windows DPI and RuneScape interface settings.
+
+Scaled searches transfer overlapping tiles of at most 1 MiB instead of a whole
+game window, and polling runs that fallback at most once per second. Native-size
+searches and cached tracking retain their faster cadence. Native-like test images
+enforce the transfer limit on 4K frames, including tile seams and window edges.
