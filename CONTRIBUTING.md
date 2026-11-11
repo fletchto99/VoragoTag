@@ -79,8 +79,13 @@ failed fallback captures do not clear them.
 
 After an unsuccessful full-window search, retries back off by 1, 2, then 4 seconds.
 The last known bar position is still checked every 100 ms; finding it resets the
-backoff and restores 25 ms tracking. Alt1's capture interval remains a lower bound
-on the normal polling delay. Each tracking comparison reads its whole pixel-offset
+backoff and restores 25 ms tracking. Successful tracking measures the interval
+between capture starts, counting capture and pixel-read time toward the interval
+instead of adding another full delay after processing. Alt1's capture interval
+remains a lower bound on that cadence. If processing overruns the interval, polling
+yields before the next capture without running catch-up scans. Missing-bar searches
+and failed captures retain their full backoff delays.
+Each tracking comparison reads its whole pixel-offset
 neighborhood once, then checks candidates in memory.
 
 Native-like tests cover 4K transfer limits, tile seams, snapshot lifetime across
