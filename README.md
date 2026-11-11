@@ -20,10 +20,11 @@ automatically. Follow the sections from left to right:
 | `tc`       | Target cycle back to Vorago.          |
 
 The bars and countdown advance in 0.6-second game ticks, with finer 0.1-second
-steps in the `ult` and `tc` windows to help you time your inputs. They round up
-the remaining time so they don't announce a window or completion early.
-If detection finishes between ticks, the first displayed step waits for the
-next tick boundary relative to the captured frame; the action windows don't shift.
+steps in the `ult` and `tc` windows to help you time your inputs. They round down
+the remaining time, matching v1.0.3: `pre-ult` and `post-ult` fill during the
+last game tick before the next action window.
+Display steps stay aligned to the captured frame even if detection finishes
+between ticks; rounding does not shift the action windows or audio deadline.
 Tick **Play audio cue on tc** if you'd like a beep when the TC
 window starts. Your choice is remembered next time you open the app.
 
