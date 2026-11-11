@@ -504,8 +504,6 @@ test("4K polling yields between tiles and never replaces an in-flight native sna
   assert.ok(detector.captureArea);
   assert.equal(onEmpty.mock.calls[0].arguments[0], 0, "report capture time, not scan completion");
   assert.ok(performance.now() > 600, "the search spans more than one game tick");
-  tick(39);
-  assert.equal(snapshots.length, 1);
   tick(1);
   assert.equal(snapshots.length, 2);
   assert.equal(snapshots[1].searches, 0);
@@ -826,6 +824,91 @@ test("polling checks a tracked bar every 25ms and keeps observing after a trigge
   frame = depleted;
   t.mock.timers.tick(25);
   assert.equal(onEmpty.mock.callCount(), 2);
+});
+
+test("tracked polling counts capture and pixel-read time toward its interval", async (t) => {
+  const [templates, empty, populated] = await fixtures;
+  for (const minimum of [0, 40]) {
+    await t.test(`minimum ${minimum}ms`, (t) => {
+      const detector = new EmptyHpDetector(templates);
+      detector.detect(new ImgRefData(populated));
+      const tick = pollingClock(t);
+      class SlowImage extends NativeLikeImage {
+        override read(x = 0, y = 0, width = this.width, height = this.height) {
+          t.mock.timers.setTime(Date.now() + 3);
+          return super.read(x, y, width, height);
+        }
+      }
+      let frame = populated;
+      const captures: number[] = [];
+      const onEmpty = t.mock.fn();
+      detector.startPolling(
+        () => {
+          captures.push(performance.now());
+          t.mock.timers.setTime(Date.now() + 10);
+          return new SlowImage(frame);
+        },
+        onEmpty,
+        () => minimum,
+      );
+      assert.equal(performance.now(), 16);
+      frame = empty;
+      const interval = Math.max(25, minimum);
+      tick(interval - performance.now() - 1);
+      assert.deepEqual(captures, [0]);
+      tick(1);
+      assert.deepEqual(captures, [0, interval]);
+      assert.equal(onEmpty.mock.callCount(), 1);
+      assert.equal(onEmpty.mock.calls[0].arguments[0], interval);
+      tick(interval * 2 - performance.now());
+      assert.deepEqual(captures, [0, interval, interval * 2]);
+      assert.equal(onEmpty.mock.callCount(), 1);
+    });
+  }
+});
+
+test("overdue tracked polling yields without adding another full interval or catching up in bursts", async (t) => {
+  const [templates, , populated] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  detector.detect(new ImgRefData(populated));
+  const tick = pollingClock(t);
+  const captures: number[] = [];
+  detector.startPolling(
+    () => {
+      captures.push(performance.now());
+      t.mock.timers.setTime(Date.now() + 60);
+      return new NativeLikeImage(populated);
+    },
+    () => {},
+    () => 40,
+  );
+  assert.equal(performance.now(), 60);
+  assert.deepEqual(captures, [0]);
+  tick(1);
+  assert.deepEqual(captures, [0, 61]);
+  assert.equal(performance.now(), 121);
+  tick(1);
+  assert.deepEqual(captures, [0, 61, 122]);
+});
+
+test("slow unavailable captures keep the full retry delay", async (t) => {
+  const [templates, , populated] = await fixtures;
+  const detector = new EmptyHpDetector(templates);
+  detector.detect(new ImgRefData(populated));
+  const tick = pollingClock(t);
+  const captures: number[] = [];
+  detector.startPolling(
+    () => {
+      captures.push(performance.now());
+      t.mock.timers.setTime(Date.now() + 60);
+      return null;
+    },
+    () => assert.fail("unavailable captures cannot trigger"),
+  );
+  tick(99);
+  assert.deepEqual(captures, [0]);
+  tick(1);
+  assert.deepEqual(captures, [0, 160]);
 });
 
 test("polling backs off captures until first acquisition, then resumes fast tracking", async (t) => {
